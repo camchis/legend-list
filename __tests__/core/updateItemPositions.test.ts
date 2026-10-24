@@ -64,6 +64,30 @@ describe("updateItemPositions", () => {
         expect(mockState.indexByKey.get("item2")).toBe(2);
     });
 
+    for (const targetKind of ["none", "offset", "end"] as const) {
+        it(`does not treat an undefined item key as a scroll target key (target: ${targetKind})`, () => {
+            mockState.props.data = [{}, { id: "valid" }];
+            mockState.props.keyExtractor = (item: any) => item.id;
+            mockState.props.estimatedItemSize = 100;
+            mockState.scrollingTo =
+                targetKind === "none"
+                    ? undefined
+                    : targetKind === "offset"
+                      ? { animated: true, offset: 50 }
+                      : { animated: true, index: 1, isScrollToEnd: true, offset: 100 };
+            const target = mockState.scrollingTo;
+            const previousIndex = target?.index;
+            const microtask = spyOn(mockState.scheduledWork, "microtask");
+
+            expect(() => updateItemPositions(mockCtx, true)).not.toThrow();
+
+            expect(mockState.positions).toEqual([0, 100]);
+            expect(mockState.scrollingTo).toBe(target);
+            expect(mockState.scrollingTo?.index).toBe(previousIndex);
+            expect(microtask).not.toHaveBeenCalled();
+        });
+    }
+
     for (const replaced of [false, true]) {
         it(`defers keyed redispatch and respects replacement targets (replaced: ${replaced})`, async () => {
             mockState.props.getFixedItemSize = () => 100;

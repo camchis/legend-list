@@ -42,10 +42,6 @@ const webScrollTypes = new WeakMap<HTMLElement, HorizontalRTLScrollType>();
 
 type HorizontalRTLState = Pick<InternalState, "horizontalRTLScrollType"> & Partial<Pick<InternalState, "refScroller">>;
 
-function getDefaultHorizontalRTLScrollType(): HorizontalRTLScrollType {
-    return Platform.OS === "web" ? "negative" : "inverted";
-}
-
 export function getNativeHorizontalRTLScrollType(state: HorizontalRTLState | undefined): HorizontalRTLScrollType {
     if (Platform.OS === "web") {
         const owner = state?.refScroller?.current?.getScrollableNode?.() as HTMLElement | null | undefined;
@@ -59,7 +55,7 @@ export function getNativeHorizontalRTLScrollType(state: HorizontalRTLState | und
             return mode;
         }
     }
-    return state?.horizontalRTLScrollType ?? getDefaultHorizontalRTLScrollType();
+    return state?.horizontalRTLScrollType ?? (Platform.OS === "web" ? "negative" : "inverted");
 }
 
 export function invalidateHorizontalRTLScrollType(state: Pick<InternalState, "props"> & HorizontalRTLState) {
@@ -69,16 +65,12 @@ export function invalidateHorizontalRTLScrollType(state: Pick<InternalState, "pr
     }
 }
 
-export function isRTLProps(props: RTLPropsLike | undefined): boolean {
-    return props?.rtl ?? !!I18nManager.isRTL;
-}
-
 export function isHorizontalRTL(state: Pick<InternalState, "props"> | undefined): boolean {
     return isHorizontalRTLProps(state?.props);
 }
 
 export function isHorizontalRTLProps(props: RTLPropsLike | undefined): boolean {
-    return !!props?.horizontal && isRTLProps(props);
+    return !!props?.horizontal && (props.rtl ?? !!I18nManager.isRTL);
 }
 
 export function getStylePaddingEnd(props: StylePaddingPropsLike | undefined): number {

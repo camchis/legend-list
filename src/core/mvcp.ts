@@ -395,7 +395,7 @@ export function prepareMVCP(
                 const newPosition = targetIndex !== undefined ? positions[targetIndex] : undefined;
 
                 if (newPosition !== undefined) {
-                    if (scrollingTo?.key === targetId && targetIndex !== undefined) scrollingTo.index = targetIndex;
+                    if (scrollingTo?.key === targetId) scrollingTo.index = targetIndex;
                     const totalSize = getContentSize(ctx);
                     let diff = newPosition - prevPosition;
 
@@ -429,7 +429,7 @@ export function prepareMVCP(
                 const targetIndex = scrollingTo.index!;
                 const newSize = getItemSize(ctx, targetId!, targetIndex, state.props.data[targetIndex]);
                 const prevSize = scrollingTo.itemSize;
-                if (newSize !== undefined && prevSize !== undefined && newSize !== prevSize) {
+                if (prevSize !== undefined && newSize !== prevSize) {
                     if (scrollingTo.viewPositionFallback) {
                         const viewport = state.scrollLength - getContentInsetEnd(ctx);
                         const previousSpace = viewport - Math.max(0, prevSize - ctx.scrollAxisGap);
