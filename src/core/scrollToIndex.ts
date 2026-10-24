@@ -2,25 +2,10 @@ import { calculateOffsetForIndex } from "@/core/calculateOffsetForIndex";
 import { scrollTo } from "@/core/scrollTo";
 import type { StateContext } from "@/state/state";
 import type { LegendListRef } from "@/types.base";
+import { clampScrollIndex } from "@/utils/clampScrollIndex";
 import { getItemSizeAtIndex } from "@/utils/getItemSize";
 
 export type ScrollToIndexParams = Parameters<LegendListRef["scrollToIndex"]>[0];
-
-export function clampScrollIndex(index: number, dataLength: number) {
-    if (dataLength <= 0) {
-        return -1;
-    }
-
-    if (index >= dataLength) {
-        return dataLength - 1;
-    }
-
-    if (index < 0) {
-        return 0;
-    }
-
-    return index;
-}
 
 export function scrollToIndex(
     ctx: StateContext,

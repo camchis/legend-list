@@ -5,9 +5,9 @@ import { checkFinishedScrollFallback, getCurrentTargetOffset } from "@/core/chec
 import { type DoScrollToParams, getNativeScrollPoint } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { scrollTo } from "@/core/scrollTo";
-import { clampScrollIndex } from "@/core/scrollToIndex";
 import type { StateContext } from "@/state/state";
 import type { LegendListScrollerRef } from "@/types.internal";
+import { clampScrollIndex } from "@/utils/clampScrollIndex";
 import { getItemSizeAtIndex } from "@/utils/getItemSize";
 import { peekLogicalHorizontalOffset } from "@/utils/rtl";
 

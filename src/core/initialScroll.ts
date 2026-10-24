@@ -4,10 +4,10 @@ import { clampScrollOffset } from "@/core/clampScrollOffset";
 import { setInitialScrollSession } from "@/core/initialScrollSession";
 import { getObservedScrollOffset } from "@/core/observedScroll";
 import { scrollTo } from "@/core/scrollTo";
-import { clampScrollIndex } from "@/core/scrollToIndex";
 import { Platform } from "@/platform/Platform";
 import type { StateContext } from "@/state/state";
 import type { ScrollIndexWithOffset, ScrollIndexWithOffsetAndContentOffset } from "@/types.base";
+import { clampScrollIndex } from "@/utils/clampScrollIndex";
 import { getItemSizeAtIndex } from "@/utils/getItemSize";
 import { resetInitialRenderState } from "@/utils/setInitialRenderState";
 
