@@ -76,7 +76,7 @@ describe("Containers native", () => {
     });
 
     for (const horizontal of [false, true]) {
-        it(`commits a shrinking content extent with Fabric row positions (horizontal: ${horizontal})`, async () => {
+        it(`commits a shrinking content extent with Fabric row positions and grows it at once (horizontal: ${horizontal})`, async () => {
             const { PositionView } = await import("@/components/PositionView");
             mock.module("@/components/Container", () => ({
                 Container: ({ id }: { id: number }) => {
@@ -121,10 +121,11 @@ describe("Containers native", () => {
             );
             const geometry = () => {
                 const tree = toJSON() as any;
-                const size = tree.props.style[horizontal ? "width" : "height"];
+                const axis = horizontal ? ["width", "minWidth"] : ["height", "minHeight"];
+                const sizes = axis.map((key) => tree.props.style[key] ?? 0);
                 return {
-                    // Animated updates change this value outside a React commit.
-                    extent: typeof size === "number" ? size : size.getValue(),
+                    // Animated updates change these values outside a React commit.
+                    extent: Math.max(...sizes.map((size) => (typeof size === "number" ? size : size.getValue()))),
                     rowPosition: tree.children[0].props.style[1][horizontal ? "left" : "top"],
                 };
             };
@@ -139,6 +140,15 @@ describe("Containers native", () => {
             });
             expect(beforeCommit).toEqual({ extent: 1000, rowPosition: 900 });
             expect(geometry()).toEqual({ extent: 700, rowPosition: 600 });
+            act(() => {
+                // The row grows back. End space outside the content (anchored end space)
+                // shrinks at once, so the extent must not wait for the commit either.
+                set$(ctx!, "containerPosition0", 900);
+                set$(ctx!, "totalSize", 1000);
+                beforeCommit = geometry();
+            });
+            expect(beforeCommit).toEqual({ extent: 1000, rowPosition: 600 });
+            expect(geometry()).toEqual({ extent: 1000, rowPosition: 900 });
             unmount();
         });
     }
