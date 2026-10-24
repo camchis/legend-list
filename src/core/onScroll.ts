@@ -186,11 +186,17 @@ export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeSc
         }
     }
 
+    const previousScroll = state.scroll;
+    const hadPreservedEndAnchorCorrection = !!state.preservedEndAnchorCorrection;
     state.scrollPending = newScroll;
 
     updateScroll(ctx, newScroll, insetChanged, { fromNativeScrollEvent: true, nativeGeometryChanged });
     trackInitialScrollNativeProgress(state, newScroll);
-    clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx);
+    // Rows measured at the new offset can start a correction; it must not pull back a scroll the list didn't make.
+    clearFinishedBootstrapInitialScrollTargetIfMovedAway(
+        ctx,
+        !hadPreservedEndAnchorCorrection && Math.abs(newScroll - previousScroll) > 1,
+    );
 
     if (state.scrollingTo) {
         checkFinishedScroll(ctx);

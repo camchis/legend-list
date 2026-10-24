@@ -12,6 +12,7 @@ import {
 import { interruptUserScroll } from "../../src/core/cancelScroll";
 import { doMaintainScrollAtEnd } from "../../src/core/doMaintainScrollAtEnd";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
+import { onScroll } from "../../src/core/onScroll";
 import { scrollToEnd } from "../../src/core/scrollToEnd";
 import { updateItemSizesBatch } from "../../src/core/updateItemSizes";
 import { Platform } from "../../src/platform/Platform";
@@ -265,6 +266,76 @@ describe("bootstrapInitialScroll", () => {
             clock.restore();
         }
     });
+
+    for (const os of ["web", "ios"] as const) {
+        it(`releases a preserved end target when an app scroll moves away while rows measure (${os})`, async () => {
+            Platform.OS = os;
+            const clock = installFakeClock();
+            const data = Array.from({ length: 20 }, (_, index) => index);
+            const ctx = createMockContext(
+                { headerSize: 0, numColumns: 1, numContainers: 20, numContainersPooled: 20, readyToRender: true },
+                {
+                    didContainersLayout: true,
+                    didFinishInitialScroll: true,
+                    endBuffered: 19,
+                    idCache: data.map((index) => `item_${index}`),
+                    indexByKey: new Map(data.map((index) => [`item_${index}`, index])),
+                    initialScroll: { index: 19, viewPosition: 1 },
+                    positions: data.map((index) => index * 100),
+                    props: {
+                        data,
+                        estimatedItemSize: 100,
+                        maintainVisibleContentPosition: { data: false, size: false },
+                    },
+                    queuedInitialLayout: true,
+                    scroll: 1700,
+                    scrollLength: 300,
+                    scrollPending: 1700,
+                    sizes: new Map(data.map((index) => [`item_${index}`, 100])),
+                    sizesKnown: new Map(data.map((index) => [`item_${index}`, 100])),
+                    startBuffered: 14,
+                    totalSize: 2000,
+                },
+            );
+            let observed = 1700;
+            ctx.state.refScroller.current = {
+                getCurrentScrollOffset: () => observed,
+                getMaxScrollOffset: () => ctx.state.totalSize - 300,
+                getScrollableNode: () => ({}),
+                scrollTo: ({ y = 0 }) => {
+                    observed = Math.max(0, Math.min(y, ctx.state.totalSize - 300));
+                },
+            } as any;
+            // Rows mounted at the new offset measure while the scroll is processed.
+            ctx.state.triggerCalculateItemsInView = () => {
+                ctx.state.triggerCalculateItemsInView = undefined;
+                ctx.state.startBuffered = 0;
+                ctx.state.endBuffered = 6;
+                updateItemSizesBatch(ctx, [{ itemKey: "item_3", size: { height: 160, width: 100 } }]);
+            };
+            try {
+                observed = 200;
+                onScroll(ctx, {
+                    nativeEvent: {
+                        contentOffset: { x: 0, y: 200 },
+                        contentSize: { height: 2000, width: 100 },
+                        layoutMeasurement: { height: 300, width: 100 },
+                    },
+                } as any);
+                for (let frame = 0; frame < 4; frame++) {
+                    await Promise.resolve();
+                    clock.advance(16);
+                    clock.tick();
+                }
+                expect(observed).toBe(200);
+                expect(ctx.state.initialScroll).toBeUndefined();
+                expect(ctx.state.preservedEndAnchorCorrection).toBeUndefined();
+            } finally {
+                ctx.state.scheduledWork.dispose();
+                clock.restore();
+            }
+        });
+    }
 
     it("resets render readiness when finished bootstrap initial scroll is replayed for arriving data", () => {
         const data = Array.from({ length: 5 }, (_, index) => ({ id: `item-${index}` }));

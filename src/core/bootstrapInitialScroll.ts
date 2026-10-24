@@ -370,14 +370,14 @@ export function schedulePreservedEndAnchorCorrection(ctx: StateContext) {
     return true;
 }
 
-export function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx: StateContext) {
+export function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx: StateContext, didScrollMove = false) {
     const state = ctx.state;
     const initialScroll = state.initialScroll;
     if (
         !state.didFinishInitialScroll ||
         state.scrollingTo?.isInitialScroll ||
         initialScroll?.viewPosition !== 1 ||
-        state.preservedEndAnchorCorrection
+        (state.preservedEndAnchorCorrection && !didScrollMove)
     ) {
         return;
     }
@@ -389,6 +389,7 @@ export function clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx: StateC
             isRetargetableBottomAlignedInitialScrollTarget(initialScroll) && peek$(ctx, "isAtEnd");
 
         if (!shouldKeepEndTargetAlive) {
+            state.preservedEndAnchorCorrection = undefined;
             // Downgrade footer targets so later header/layout changes can still retarget them.
             if (initialScroll.preserveForFooterLayout) {
                 clearPendingInitialScrollFooterLayout(ctx, {
