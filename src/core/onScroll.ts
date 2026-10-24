@@ -170,14 +170,17 @@ export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeSc
     ) {
         const maxOffset = clampScrollOffset(ctx, newScroll, state.scrollingTo);
         if (newScroll !== maxOffset && Math.abs(newScroll - maxOffset) > 1) {
-            // If the scroll is past the end for some reason, clamp it to the end
-            newScroll = maxOffset;
-            scrollTo(ctx, {
-                forceScroll: true,
-                isInitialScroll: true,
-                noScrollingTo: true,
-                offset: newScroll,
-            });
+            // When JS state is already at this end, the instant scroll is in flight and this event predates it,
+            // so re-sending would only duplicate the native command. Initial scrolls may not have dispatched yet.
+            if (state.scrollingTo.isInitialScroll || Math.abs(state.scroll - maxOffset) > 1) {
+                // If the scroll is past the end for some reason, clamp it to the end
+                scrollTo(ctx, {
+                    forceScroll: true,
+                    isInitialScroll: true,
+                    noScrollingTo: true,
+                    offset: maxOffset,
+                });
+            }
 
             return;
         }
