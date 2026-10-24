@@ -109,6 +109,20 @@ describe("screen reader scroll ownership", () => {
         expect(callback).not.toHaveBeenCalled();
         ctx.state.scheduledWork.dispose();
     });
+    it("keeps unclassified native input silent until screen-reader detection is enabled", () => {
+        enabled = false;
+        const { ctx, callback, scroll } = setup();
+        scroll(700);
+        scroll(650);
+        scroll(600);
+        expect(callback).not.toHaveBeenCalled();
+        enabled = true;
+        scroll(550);
+        scroll(500);
+        expect(callback).toHaveBeenCalledTimes(1);
+        ctx.state.scheduledWork.dispose();
+    });
+
     for (const alreadyMeasured of [false, true]) {
         it(`accepts accessibility input after an append is measured (cached: ${alreadyMeasured})`, () => {
             const { ctx, callback, scroll } = setup();

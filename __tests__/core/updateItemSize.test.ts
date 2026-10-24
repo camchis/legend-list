@@ -359,7 +359,7 @@ describe("item size update functions", () => {
 
             it.each(["web", "ios", "android"] as const)(
                 "rearms end following when a drag is released within the threshold on %s",
-                (platform) => {
+                async (platform) => {
                     Platform.OS = platform;
                     mockState.isWithinMaintainScrollAtEndThreshold = true;
                     mockState.isDragging = true;
@@ -368,6 +368,7 @@ describe("item size update functions", () => {
                     mockState.isDragging = false;
 
                     updateItemAndFlush(mockCtx, "item_0", { height: 150, width: 400 });
+                    await Promise.resolve();
                     rafCallback?.(0);
 
                     expect(mockState.endFollowInterrupted).toBe(false);
@@ -377,11 +378,12 @@ describe("item size update functions", () => {
 
             it.each(["web", "ios", "android"] as const)(
                 "cancels a first-measurement follow when the user scrolls away on %s",
-                (platform) => {
+                async (platform) => {
                     Platform.OS = platform;
                     mockState.isWithinMaintainScrollAtEndThreshold = true;
 
                     updateItemAndFlush(mockCtx, "item_0", { height: 150, width: 400 });
+                    await Promise.resolve();
 
                     const isWeb = platform === "web";
                     expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(isWeb ? 0 : 1);
@@ -392,6 +394,7 @@ describe("item size update functions", () => {
                     mockState.scroll = 100;
                     mockState.isWithinMaintainScrollAtEndThreshold = false;
                     updateItemAndFlush(mockCtx, "item_0", { height: 180, width: 400 });
+                    await Promise.resolve();
                     rafCallback?.(0);
 
                     expect(runTrackedScrollToEnd).toHaveBeenCalledTimes(isWeb ? 1 : 0);

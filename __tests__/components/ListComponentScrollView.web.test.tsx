@@ -2234,3 +2234,62 @@ it("does not report list-owned scroll events as user scrolls", async () => {
         interrupt.mockRestore();
     }
 });
+
+it("distinguishes owned scrolls and overlay presses from accepted wheel input", async () => {
+    registerWebScrollMocks();
+    resetMocks();
+    maxOffset = 1000;
+    const callback = mock(() => {});
+    mockCtx.state.props.onUserScroll = callback;
+    const { ListComponentScrollView } = await import(
+        "../../src/components/ListComponentScrollView?owned-input-callback"
+    );
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+        renderer = TestRenderer.create(
+            <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll />,
+        );
+    });
+    const previousOffsetWidth = scrollableNode.offsetWidth;
+    try {
+        mockCtx.state.scrollingTo = { animated: true, offset: 100 };
+        ownerScroll = 100;
+        scrollListeners.get("scroll")?.({} as Event);
+        expect(callback).not.toHaveBeenCalled();
+        mockCtx.state.scrollingTo = undefined;
+        scrollableNode.offsetWidth = scrollableNode.clientWidth;
+        scrollListeners.get("pointerdown")?.({ clientX: 200, clientY: 50, target: scrollableNode } as any);
+        expect(callback).not.toHaveBeenCalled();
+        scrollListeners.get("wheel")?.({ deltaX: 0, deltaY: 20, target: scrollableNode } as any);
+        expect(callback).toHaveBeenCalledTimes(1);
+    } finally {
+        scrollableNode.offsetWidth = previousOffsetWidth;
+        act(() => renderer!.unmount());
+    }
+});
+
+it("registers passive continuous input listeners and removes every input listener", async () => {
+    registerWebScrollMocks();
+    resetMocks();
+    const { ListComponentScrollView } = await import(
+        "../../src/components/ListComponentScrollView?input-listener-options"
+    );
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+        renderer = TestRenderer.create(
+            <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll>
+                <div />
+            </ListComponentScrollView>,
+        );
+    });
+    for (const event of ["wheel", "touchstart", "touchmove"]) {
+        expect(addEventListener).toHaveBeenCalledWith(event, expect.any(Function), { passive: true });
+    }
+    for (const event of ["keydown", "pointerdown", "pointerup", "pointercancel"]) {
+        expect(addEventListener.mock.calls.some(([type]) => type === event)).toBe(true);
+        expect(addEventListener.mock.calls.find(([type]) => type === event)?.[2]).not.toEqual({ passive: true });
+    }
+    const registered = [...scrollListeners.entries()];
+    act(() => renderer!.unmount());
+    for (const [event, listener] of registered) expect(removeEventListener).toHaveBeenCalledWith(event, listener);
+});

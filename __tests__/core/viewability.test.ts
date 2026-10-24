@@ -97,6 +97,8 @@ describe("viewability system", () => {
 
         it("preserves the item percentage threshold when a tall row fills the remaining viewport", () => {
             const { token, items } = measure(1000, 335, { itemVisiblePercentThreshold: 50 });
+            expect(token.scrollSize).toBe(245);
+            expect(measure(1000, 0, { itemVisiblePercentThreshold: 50 }).token.scrollSize).toBe(580);
             expect(token.sizeVisible).toBe(245);
             expect(token.percentVisible).toBe(24.5);
             expect(token.percentOfScroller).toBe(100);

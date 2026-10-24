@@ -93,6 +93,25 @@ describe("rtl horizontal coordinate helpers", () => {
         expect(toNativeHorizontalOffset(state, 650, 1000)).toBe(650);
     });
 
+    it("uses the LTR document scroll owner for an RTL list", () => {
+        Platform.OS = "web";
+        state.horizontalRTLScrollType = "negative";
+        const previousDocument = globalThis.document;
+        const owner = {} as HTMLElement;
+        globalThis.document = { documentElement: owner, scrollingElement: owner } as any;
+        state.refScroller.current = { getScrollableNode: () => document.scrollingElement } as any;
+        globalThis.getComputedStyle = ((element) => {
+            expect(element).toBe(owner);
+            return { direction: "ltr" } as CSSStyleDeclaration;
+        }) as typeof getComputedStyle;
+        try {
+            expect(toNativeHorizontalOffset(state, 200, 1000)).toBe(200);
+            expect(toLogicalHorizontalOffset(state, 200, 1000)).toBe(200);
+        } finally {
+            globalThis.document = previousDocument;
+        }
+    });
+
     it("places rendered RTL rows inside an LTR owner's logical viewport", () => {
         Platform.OS = "web";
         state.refScroller.current = { getScrollableNode: () => ({}) } as any;

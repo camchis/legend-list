@@ -1,4 +1,4 @@
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
 import * as React from "react";
@@ -83,9 +83,14 @@ describe("scrollToOffset content container minimum size", () => {
         act(() => scrollProps.onLayout({ nativeEvent: { layout: { height: 500, width: 500, x: 0, y: 0 } } }));
         await flushFrames();
         writes.length = 0;
+        const settled = mock(() => {});
         act(() => {
-            void (scroll ? scroll(ref.current!) : ref.current!.scrollToOffset({ animated: false, offset: 300 }));
+            void (scroll ? scroll(ref.current!) : ref.current!.scrollToOffset({ animated: false, offset: 300 })).then(
+                settled,
+            );
         });
+        await Promise.resolve();
+        if (expected > 0) expect(settled).not.toHaveBeenCalled();
         expect(writes.at(-1)?.[horizontal ? "x" : "y"] ?? 0).toBe(expected);
         // The landing event must not be clamped back to the logical max.
         act(() =>
@@ -101,6 +106,7 @@ describe("scrollToOffset content container minimum size", () => {
         expect(writes.at(-1)?.[horizontal ? "x" : "y"] ?? 0).toBe(expected);
         expect(ctx!.state.scroll).toBe(expected);
         expect(ctx!.state.scrollingTo).toBeUndefined();
+        expect(settled).toHaveBeenCalledTimes(1);
         list.unmount();
     });
 });

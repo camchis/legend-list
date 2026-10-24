@@ -92,6 +92,11 @@ function mergeItemSizeUpdateResult(result: ItemSizeUpdateResult, next: ItemSizeU
 
 function flushItemSizeUpdates(ctx: StateContext, result: ItemSizeUpdateResult) {
     const state = ctx.state;
+    if (result.shouldMaintainScrollAtEnd && Platform.OS === "web") {
+        // Let React commit the geometry, then give maintenance ownership
+        // before the preserved correction (including for animated follows).
+        queueMicrotask(() => doMaintainScrollAtEnd(ctx, { immediate: true }));
+    }
     if (result.needsRecalculate) {
         if (result.didChange) {
             // Keep the saved end target through MVCP and ScrollAdjust's temporary padding.
@@ -106,7 +111,7 @@ function flushItemSizeUpdates(ctx: StateContext, result: ItemSizeUpdateResult) {
         maybeUpdateAnchoredEndSpace(ctx);
         checkThresholds(ctx);
     }
-    if (result.shouldMaintainScrollAtEnd) {
+    if (result.shouldMaintainScrollAtEnd && Platform.OS !== "web") {
         doMaintainScrollAtEnd(ctx, { immediate: true });
     }
 }

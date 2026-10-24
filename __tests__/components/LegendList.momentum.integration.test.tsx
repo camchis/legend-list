@@ -1146,23 +1146,29 @@ describe.each([false, true])("native end following during momentum (screen reade
         }
     }
 
-    it("uses the final drag and momentum event offsets without requiring another scroll event", async () => {
-        const onScroll = mock(() => {});
-        const list = await mountFollowingList({ onScroll });
-        onScroll.mockClear();
-        try {
-            list.beginDrag();
-            list.scroll(500);
-            list.endDrag(690);
-            expect(onScroll).toHaveBeenCalledTimes(1);
-            list.beginMomentum();
-            await list.append(3);
-            list.endMomentum(690);
-            expect(onScroll).toHaveBeenCalledTimes(1);
-            await flushFrames();
-            expect(list.writes.map(({ y }) => y)).toEqual([850]);
-        } finally {
-            list.unmount();
-        }
-    });
+    it.each(["drag", "momentum"] as const)(
+        "synchronizes the final %s offset without emitting public scroll events",
+        async (event) => {
+            const onScroll = mock(() => {});
+            const list = await mountFollowingList({ onScroll });
+            onScroll.mockClear();
+            try {
+                list.beginDrag();
+                expect(onScroll).not.toHaveBeenCalled();
+                list.scroll(500);
+                list.endDrag(event === "drag" ? 690 : 500);
+                if (event === "drag") expect(list.context().state.scroll).toBe(690);
+                expect(onScroll).toHaveBeenCalledTimes(1);
+                list.beginMomentum();
+                await list.append(3);
+                list.endMomentum(680);
+                expect(list.context().state.scroll).toBe(680);
+                expect(onScroll).toHaveBeenCalledTimes(1);
+                await flushFrames();
+                expect(list.writes.map(({ y }) => y)).toEqual([850]);
+            } finally {
+                list.unmount();
+            }
+        },
+    );
 });

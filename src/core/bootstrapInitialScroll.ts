@@ -363,7 +363,10 @@ export function schedulePreservedEndAnchorCorrection(ctx: StateContext) {
 
         requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    // React commits the measured extent and positions in a microtask. Correct
+    // after that commit so web growth paints at the end, without waiting a frame.
+    if (Platform.OS === "web") queueMicrotask(tick);
+    else requestAnimationFrame(tick);
     return true;
 }
 

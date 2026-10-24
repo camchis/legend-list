@@ -7,6 +7,7 @@ import {
     handleBootstrapInitialScrollDataChange,
     handleBootstrapInitialScrollFooterLayout,
     handleBootstrapInitialScrollLayoutChange,
+    startBootstrapInitialScrollOnMount,
 } from "../../src/core/bootstrapInitialScroll";
 import { interruptUserScroll } from "../../src/core/cancelScroll";
 import { doMaintainScrollAtEnd } from "../../src/core/doMaintainScrollAtEnd";
@@ -36,9 +37,82 @@ describe("bootstrapInitialScroll", () => {
         rafHandle = 0;
     });
 
+    for (const [previousDataLength, dataLength] of [
+        [0, 3],
+        [3, 3],
+        [3, 4],
+        [0, 0],
+    ]) {
+        it(`rearms an idle preserved index target only for arriving data (${previousDataLength} to ${dataLength})`, () => {
+            const ctx = createMockContext(
+                {},
+                {
+                    didFinishInitialScroll: false,
+                    initialScroll: { index: 2, viewPosition: 0 },
+                    initialScrollSession: { kind: "bootstrap", previousDataLength },
+                    positions: [0, 100, 200, 300],
+                    props: { data: Array.from({ length: dataLength }, (_, i) => i), estimatedItemSize: 100 },
+                    scrollLength: 100,
+                },
+            );
+            handleBootstrapInitialScrollDataChange(ctx, {
+                dataLength,
+                didDataChange: true,
+                initialScrollAtEnd: false,
+                previousDataLength,
+                stylePaddingEnd: 0,
+            });
+            expect(!!ctx.state.initialScrollSession?.bootstrap).toBe(previousDataLength === 0 && dataLength > 0);
+            ctx.state.scheduledWork.dispose();
+        });
+    }
+
+    for (const os of ["ios", "web"] as const) {
+        it(`replaces the outgoing bootstrap seed on mount restart (${os})`, () => {
+            Platform.OS = os;
+            const ctx = createMockContext(
+                {},
+                {
+                    initialScroll: { index: 4 },
+                    initialScrollSession: {
+                        bootstrap: { mountFrameCount: 1, passCount: 2, scroll: 100, seedContentOffset: 100 },
+                        kind: "bootstrap",
+                        previousDataLength: 5,
+                    },
+                    positions: [0, 100, 200, 300, 400],
+                    props: { data: [0, 1, 2, 3, 4], getFixedItemSize: () => 100 },
+                    scrollLength: 100,
+                },
+            );
+            startBootstrapInitialScrollOnMount(ctx, { initialScrollAtEnd: false, target: { index: 4 } });
+            expect(ctx.state.initialScrollSession?.bootstrap).toMatchObject({
+                mountFrameCount: 1,
+                scroll: 400,
+                seedContentOffset: os === "web" ? 0 : 400,
+            });
+            ctx.state.scheduledWork.dispose();
+        });
+    }
+
+    it("leaves offset-only sessions to the offset completion path", () => {
+        const ctx = createMockContext(
+            {},
+            {
+                initialScroll: { contentOffset: 200, index: 0 },
+                initialScrollSession: { kind: "offset", previousDataLength: 3 },
+                props: { data: [0, 1, 2] },
+            },
+        );
+        const session = ctx.state.initialScrollSession;
+        evaluateBootstrapInitialScroll(ctx);
+        expect(ctx.state.initialScrollSession).toBe(session);
+        expect(ctx.state.initialScroll).toMatchObject({ contentOffset: 200 });
+        expect(ctx.state.scrollingTo).toBeUndefined();
+    });
+
     for (const mode of [undefined, "negative", "inverted"] as const) {
         for (const interrupt of [false, true]) {
-            it(`keeps measurement corrections in the logical viewport and yields to user input (RTL ${mode}, interrupt ${interrupt})`, () => {
+            it(`keeps measurement corrections in the logical viewport and yields to user input (RTL ${mode}, interrupt ${interrupt})`, async () => {
                 Platform.OS = "web";
                 const clock = installFakeClock();
                 const data = Array.from({ length: 20 }, (_, index) => index);
@@ -106,6 +180,7 @@ describe("bootstrapInitialScroll", () => {
                         interruptUserScroll(ctx);
                         rawOffset = mode === "negative" ? -200 : mode === "inverted" ? max() - 200 : 200;
                     }
+                    await Promise.resolve();
                     clock.tick();
                     expect(logicalOffset()).toBe(interrupt ? 200 : 300);
                     if (interrupt) {
@@ -118,6 +193,7 @@ describe("bootstrapInitialScroll", () => {
                             { itemKey: "item_4", size: { height: mode ? 100 : 150, width: mode ? 150 : 100 } },
                         ]);
                         if (mode === "inverted") rawOffset += 50;
+                        await Promise.resolve();
                         clock.tick();
                         expect(logicalOffset()).toBe(350);
                         clock.tick();
@@ -131,7 +207,7 @@ describe("bootstrapInitialScroll", () => {
         }
     }
 
-    it("retries a preserved end correction after silent DOM extent growth", () => {
+    it("retries a preserved end correction after silent DOM extent growth", async () => {
         Platform.OS = "web";
         const clock = installFakeClock();
         const data = Array.from({ length: 20 }, (_, index) => index);
@@ -173,6 +249,7 @@ describe("bootstrapInitialScroll", () => {
         } as any;
         try {
             updateItemSizesBatch(ctx, [{ itemKey: "item_19", size: { height: 200, width: 100 } }]);
+            await Promise.resolve();
             clock.tick();
             expect(observed).toBe(1700);
             expect(ctx.state.preservedEndAnchorCorrection).toBeDefined();

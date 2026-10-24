@@ -143,6 +143,40 @@ describe("Containers native", () => {
         });
     }
 
+    it("commits Fabric content extent for every distinct total size", async () => {
+        const { Containers } = await import("../../src/components/Containers.native?extent-commit-count");
+        let ctx: StateContext;
+        let commits = 0;
+        function Content() {
+            ctx = useStateContext();
+            ctx.state = createMockState();
+            ctx.values.set("readyToRender", true);
+            ctx.values.set("numContainersPooled", 0);
+            ctx.values.set("totalSize", 1000);
+            return (
+                <Containers
+                    freshDataTransitionEpoch={0}
+                    getRenderedItem={() => null}
+                    horizontal={false}
+                    recycleItems={false}
+                />
+            );
+        }
+        const list = render(
+            <StateProvider>
+                <React.Profiler id="extent" onRender={() => commits++}>
+                    <Content />
+                </React.Profiler>
+            </StateProvider>,
+        );
+        expect(commits).toBe(1);
+        for (const size of [900, 800, 700]) act(() => set$(ctx!, "totalSize", size));
+        expect(commits).toBe(4);
+        act(() => set$(ctx!, "totalSize", 700));
+        expect(commits).toBe(4);
+        list.unmount();
+    });
+
     it("runs coordinated measurement after child layout effects", async () => {
         const { ContainerLayoutCoordinator } = await import("@/components/ContainerLayoutCoordinator");
         let didRunChildLayoutEffect = false;

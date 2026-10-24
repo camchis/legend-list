@@ -76,6 +76,27 @@ describe("checkResetContainers", () => {
         expect(state.pendingEndMeasurements).toEqual(new Set(["item-3"]));
     });
 
+    for (const [kind, ids, columns, follows] of [
+        ["references", ["item-1", "item-2", "item-3"], false, true],
+        ["immutable keys", ["item-1", "item-2", "item-3"], false, true],
+        ["reorder", ["item-2", "item-1", "item-3"], false, false],
+        ["truncate", ["item-1"], false, false],
+        ["replace", ["new", "item-2", "item-3"], false, false],
+        ["columns", ["item-1", "item-2", "item-3"], true, false],
+    ] as const) {
+        it(`follows only a strict key-preserving append (${kind})`, () => {
+            const previous = state.props.data;
+            const data = ids.map((id) =>
+                kind === "references" ? (previous.find((item) => item.id === id) ?? { id }) : { id },
+            );
+            state.previousData = previous;
+            state.props.data = data;
+            state.props.maintainScrollAtEnd = { on: { dataAppend: true } };
+            checkResetContainers(ctx, data, { didColumnsChange: columns });
+            expect(doMaintainScrollAtEndSpy).toHaveBeenCalledTimes(follows ? 1 : 0);
+        });
+    }
+
     it("skips key extraction for an unchanged reference prefix in append mode", () => {
         const previousData = Array.from({ length: 5000 }, (_, id) => ({ id }));
         const data = [...previousData, { id: 5000 }];

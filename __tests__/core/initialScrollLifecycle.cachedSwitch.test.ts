@@ -21,7 +21,7 @@ describe("cached tall-row initial placement", () => {
             [150, false],
             [150, true],
         ] as const) {
-            it(`lands on ${targetIndex} after ${fresh ? "a fresh mount" : "a completed B bootstrap"} and late growth (recycle ${recycleItems})`, () => {
+            it(`lands on ${targetIndex} after ${fresh ? "a fresh mount" : "a completed B bootstrap"} and late growth (recycle ${recycleItems})`, async () => {
                 const previousPlatform = Platform.OS;
                 const previousRAF = globalThis.requestAnimationFrame;
                 const previousCAF = globalThis.cancelAnimationFrame;
@@ -165,6 +165,7 @@ describe("cached tall-row initial placement", () => {
                         })),
                     );
                     domHeight = state.totalSize;
+                    await Promise.resolve();
                     for (let frame = 6; frame <= 12; frame++) flushFrame(frame * 16);
 
                     expect(state.didFinishInitialScroll).toBe(true);

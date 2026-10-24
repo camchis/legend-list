@@ -640,6 +640,7 @@ describe("LegendList bootstrap initial scroll", () => {
                     expect(targetAfterReplay).toMatchObject({ index: 19, viewPosition: 1 });
                     expect(ctx!.state.preservedEndAnchorCorrection).toBe(firstCorrection);
                     maxOffset = resolveInitialScrollOffset(ctx!, ctx!.state.initialScroll!);
+                    await Promise.resolve();
                     act(() => clock.advance(64));
                     expect(scrollOffsets.length).toBeGreaterThan(0);
                     expect(observedOffset).toBe(maxOffset);
@@ -653,6 +654,7 @@ describe("LegendList bootstrap initial scroll", () => {
                 ctx!.state.refScroller.current = null;
                 const framesBefore = scheduleFrame.mock.calls.length;
                 const callsBefore = scrollOffsets.length;
+                await Promise.resolve();
                 act(() => clock.advance(1600));
                 expect(scheduleFrame.mock.calls.length).toBe(framesBefore);
                 expect(scrollOffsets).toHaveLength(callsBefore);
@@ -661,7 +663,8 @@ describe("LegendList bootstrap initial scroll", () => {
                 // An old-architecture measurement can arrive after cleanup has run.
                 updateItemSizesBatch(ctx!, [{ itemKey: "item_19", size: { height: 500, width: 320 } }]);
                 const framesAfterMeasurement = scheduleFrame.mock.calls.length;
-                expect(framesAfterMeasurement).toBeGreaterThan(framesBefore);
+                expect(framesAfterMeasurement).toBe(framesBefore);
+                await Promise.resolve();
                 act(() => clock.advance(1600));
                 expect(scheduleFrame.mock.calls.length).toBe(framesAfterMeasurement);
                 expect(scrollOffsets).toHaveLength(callsBefore);

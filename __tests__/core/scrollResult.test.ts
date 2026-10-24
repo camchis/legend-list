@@ -381,6 +381,102 @@ describe("imperative scroll results", () => {
         expect(h.state.scrollingTo).toBeUndefined();
     });
 
+    it("waits for observed landing with scrollToKey", async () => {
+        const h = harness!;
+        const result = trackScroll(h.ref.scrollToKey({ animated: true, key: "item_50" }));
+        await flushMicrotasks();
+        expect(result.resolved).toBe(false);
+        h.browser.step(100);
+        await flushMicrotasks();
+        expect(result.resolved).toBe(false);
+        h.browser.runToEnd();
+        h.clock.advance(100);
+        await flushMicrotasks();
+        expect(h.browser.offset).toBe(5000);
+        expect(result.resolved).toBe(true);
+        expect(result.value).toBeUndefined();
+    });
+
+    it("waits for clamped landing with scrollToOffset", async () => {
+        const h = harness!;
+        h.browser.moveTo(500);
+        spyOn(Date, "now").mockImplementation(() => h.clock.now);
+        const result = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 20000 }));
+        await flushMicrotasks();
+        expect(result.resolved).toBe(false);
+        h.clock.advance(1000);
+        await flushMicrotasks();
+        expect(result.resolved).toBe(false);
+        h.browser.runToEnd();
+        h.clock.advance(100);
+        await flushMicrotasks();
+        expect(h.browser.offset).toBe(9500);
+        expect(result.resolved).toBe(true);
+    });
+
+    for (const edge of ["start", "end", "inset"] as const) {
+        it(`reveals a normal row clipped at the ${edge} boundary despite an inclusive render range`, async () => {
+            const h = harness!;
+            const offset = edge === "start" ? 210 : edge === "inset" ? 100 : 90;
+            const index = edge === "start" ? 2 : 5;
+            h.browser.moveTo(offset);
+            h.state.startNoBuffer = 0;
+            h.state.endNoBuffer = 10;
+            if (edge === "inset") h.state.contentInsetOverride = { bottom: 10 };
+            const result = trackScroll(h.ref.scrollIndexIntoView({ index }));
+            h.browser.runToEnd();
+            h.clock.advance(100);
+            await flushMicrotasks();
+            expect(h.browser.offset).toBe(edge === "start" ? 200 : edge === "inset" ? 110 : 100);
+            expect(result.resolved).toBe(true);
+            const calls = h.scrollToCalls.length;
+            await h.ref.scrollIndexIntoView({ index });
+            expect(h.scrollToCalls).toHaveLength(calls);
+        });
+    }
+
+    for (const extent of ["headerSize", "footerSize"] as const) {
+        for (const method of [
+            "scrollToIndex",
+            "scrollToItem",
+            "scrollToKey",
+            "scrollToEnd",
+            "scrollIndexIntoView",
+            "scrollItemIntoView",
+        ] as const) {
+            it(`settles empty ${method} without transport with ${extent}`, async () => {
+                const h = harness!;
+                h.setData(0);
+                h.ctx.values.set(extent, 1200);
+                spyOn(Date, "now").mockImplementation(() => h.clock.now);
+                const result = trackScroll(h.ref[method]({ index: 0, item: { id: 0 }, key: "item_0" }));
+                h.clock.advance(1000);
+                await flushMicrotasks();
+                expect(result.resolved).toBe(true);
+                expect(result.value).toBeUndefined();
+                expect(h.scrollToCalls).toHaveLength(0);
+            });
+        }
+    }
+
+    it("emits public following transitions until unsubscribe", async () => {
+        const h = harness!;
+        h.state.props.maintainScrollAtEnd = { animated: false };
+        const values: boolean[] = [];
+        const unsubscribe = h.ref.getState().listen("isFollowingEnd", (value) => values.push(value));
+        const end = h.ref.scrollToEnd({ animated: false });
+        h.clock.advance(100);
+        await end;
+        interruptMaintainScrollAtEnd(h.ctx);
+        const next = h.ref.scrollToEnd({ animated: false });
+        h.clock.advance(100);
+        await next;
+        expect(values).toEqual([false, true, false, true]);
+        unsubscribe();
+        interruptMaintainScrollAtEnd(h.ctx);
+        expect(values).toEqual([false, true, false, true]);
+    });
+
     it("resolves a landed scroll", async () => {
         const h = harness!;
         const scroll = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 1200 }));

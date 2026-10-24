@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import "../setup";
-import { useState } from "react";
+import { createRef, useState } from "react";
 import { RefreshControl, Text } from "react-native";
 
 import { act, render } from "../helpers/testingLibrary";
@@ -19,6 +19,7 @@ import { setFooterSize, setHeaderSize } from "../../src/core/updateContentMetric
 import { updateItemSizesBatch } from "../../src/core/updateItemSizes";
 import { updateScroll } from "../../src/core/updateScroll";
 import { Platform } from "../../src/platform/Platform";
+import * as screenReader from "../../src/platform/screenReader";
 import { peek$, type StateContext, set$, useArr$ } from "../../src/state/state";
 import { getKnownOrFixedItemSize } from "../../src/utils/getItemSize";
 import { clearWarnDevOnceForTests } from "../../src/utils/helpers";
@@ -161,6 +162,113 @@ describe("LegendList props behavior", () => {
         rendered.rerender(list());
         expect(sizes).not.toHaveBeenCalled();
         rendered.unmount();
+    });
+
+    it("recalculates positions when fixed sizing is enabled and disabled", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?fixed-size-toggle");
+        const data = [{ id: "a" }, { id: "b" }, { id: "c" }];
+        const fixed = (_item: { id: string }, index: number) => (index === 1 ? 150 : undefined);
+        const list = (enabled: boolean) => (
+            <LegendList
+                data={data}
+                estimatedItemSize={100}
+                getFixedItemSize={enabled ? fixed : undefined}
+                keyExtractor={(item) => item.id}
+                renderItem={() => null}
+            />
+        );
+        const rendered = render(list(false));
+        act(() => lastListProps.onLayout(layoutEvent));
+        await flushAsync();
+        const ctx = await getContextFromRender();
+        act(() =>
+            updateItemSizesBatch(ctx, [
+                { itemKey: "a", size: { height: 80, width: 320 } },
+                { itemKey: "b", size: { height: 100, width: 320 } },
+                { itemKey: "c", size: { height: 100, width: 320 } },
+            ]),
+        );
+        await flushAsync();
+        expect(ctx.state.positions).toEqual([0, 80, 180]);
+        rendered.rerender(list(true));
+        await flushAsync();
+        expect(ctx.state.positions).toEqual([0, 80, 230]);
+        expect(ctx.state.sizesKnown.get("a")).toBe(80);
+        rendered.rerender(list(false));
+        act(() => updateItemSizesBatch(ctx, [{ itemKey: "b", size: { height: 100, width: 320 } }]));
+        await flushAsync();
+        expect(ctx.state.sizesKnown.get("a")).toBe(80);
+        expect(ctx.state.positions).toEqual([0, 80, 180]);
+        rendered.unmount();
+    });
+
+    it("applies fixed sizes to measured rows reordered before the first layout", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?fixed-size-prelayout-reorder");
+        let data = [{ id: "a" }, { id: "b" }, { id: "c" }];
+        const ref = createRef<any>();
+        const fixed = (item: { id: string }) => (item.id === "b" ? 150 : undefined);
+        const list = (enabled: boolean) => (
+            <LegendList
+                data={data}
+                estimatedItemSize={100}
+                getFixedItemSize={enabled ? fixed : undefined}
+                keyExtractor={(item) => item.id}
+                ref={ref}
+                renderItem={() => null}
+            />
+        );
+        const rendered = render(list(false));
+        const ctx = await getContextFromRender();
+        act(() => {
+            ref.current.setItemSize("a", { height: 80, width: 320 });
+            ref.current.setItemSize("b", { height: 100, width: 320 });
+            ref.current.setItemSize("c", { height: 100, width: 320 });
+        });
+        data = [data[1], data[0], data[2]];
+        rendered.rerender(list(true));
+        act(() => lastListProps.onLayout(layoutEvent));
+        await flushAsync();
+        expect(ctx.state.sizesKnown.get("a")).toBe(80);
+        expect(ctx.state.sizesKnown.get("b")).toBe(150);
+        expect(ctx.state.positions).toEqual([0, 150, 230]);
+        rendered.unmount();
+    });
+
+    it("forces a full extraData position pass only with fixed sizing", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?extra-data-position-pass");
+        const data = ["a", "b", "c"];
+        const fixed = mock(() => 100);
+        const list = (extraData: number, enabled: boolean) => (
+            <LegendList
+                data={data}
+                estimatedItemSize={100}
+                extraData={extraData}
+                getFixedItemSize={enabled ? fixed : undefined}
+                renderItem={() => null}
+            />
+        );
+        const rendered = render(list(0, false));
+        act(() => lastListProps.onLayout(layoutEvent));
+        await flushAsync();
+        const ctx = await getContextFromRender();
+        const calculate = spyOn(calculateModule, "calculateItemsInView");
+        try {
+            rendered.rerender(list(1, false));
+            await flushAsync();
+            expect(calculate.mock.calls.some(([, options]) => options?.forceFullItemPositions)).toBe(false);
+            rendered.rerender(list(1, true));
+            await flushAsync();
+            fixed.mockClear();
+            calculate.mockClear();
+            rendered.rerender(list(2, true));
+            await flushAsync();
+            expect(fixed).toHaveBeenCalledWith("a", 0, "");
+            expect(ctx.state.positions).toEqual([0, 100, 200]);
+            expect(calculate.mock.calls.some(([, options]) => options?.forceFullItemPositions)).toBe(true);
+        } finally {
+            calculate.mockRestore();
+            rendered.unmount();
+        }
     });
 
     it("preserves the visible anchor when extraData changes fixed sizes", async () => {
@@ -2168,6 +2276,29 @@ describe("LegendList props behavior", () => {
         rendered.unmount();
     });
 
+    it("uses the latest metrics callback without resubscribing to unchanged geometry", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?metrics-latest-callback");
+        const data = ["row"];
+        const first = mock(() => {});
+        const next = mock(() => {});
+        const list = (onMetricsChange: typeof first) => (
+            <LegendList data={data} onMetricsChange={onMetricsChange} renderItem={() => null} />
+        );
+        const rendered = render(list(first));
+        const ctx = await getContextFromRender();
+        const listeners = [...ctx.listeners.get("headerSize")!];
+        const count = first.mock.calls.length;
+        rendered.rerender(list(next));
+        expect(first).toHaveBeenCalledTimes(count);
+        expect(next).not.toHaveBeenCalled();
+        expect([...ctx.listeners.get("headerSize")!]).toEqual(listeners);
+        act(() => setHeaderSize(ctx, 42));
+        expect(first).toHaveBeenCalledTimes(count);
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(next).toHaveBeenCalledWith({ footerSize: 0, headerSize: 42 });
+        rendered.unmount();
+    });
+
     it("reports only header and footer size changes through onMetricsChange", async () => {
         const { LegendList } = await import("../../src/components/LegendList?metrics-header-footer");
         const onMetricsChange = mock(() => {});
@@ -2343,5 +2474,20 @@ describe("LegendList props behavior", () => {
         expect(state.scrollForNextCalculateItemsInView).toBeUndefined();
 
         rendered.unmount();
+    });
+    it("subscribes each mounted list and releases only its own screen-reader ownership", async () => {
+        const removed = [mock(() => {}), mock(() => {})];
+        const subscribe = mock(() => removed[subscribe.mock.calls.length - 1]);
+        spyOn(screenReader, "isScreenReaderEnabled").mockReturnValue(false);
+        spyOn(screenReader, "subscribeScreenReader").mockImplementation(subscribe);
+        const { LegendList } = await import("../../src/components/LegendList?screen-reader-list-lifetime");
+        const first = render(<LegendList data={["a"]} renderItem={() => null} />);
+        const second = render(<LegendList data={["b"]} renderItem={() => null} />);
+        expect(subscribe).toHaveBeenCalledTimes(2);
+        first.unmount();
+        expect(removed[0]).toHaveBeenCalledTimes(1);
+        expect(removed[1]).not.toHaveBeenCalled();
+        second.unmount();
+        expect(removed[1]).toHaveBeenCalledTimes(1);
     });
 });

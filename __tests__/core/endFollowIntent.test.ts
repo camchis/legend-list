@@ -789,6 +789,7 @@ describe("end maintenance request ownership", () => {
             );
             const earlierResolve = ctx.state.pendingScrollResolve;
             updateItemSizes(ctx, { itemKey: "tail", size: { height: 104, width: 200 } });
+            await Promise.resolve();
             expect(ctx.state.pendingMaintainScrollAtEnd).toBe(false);
             expect(ctx.state.pendingScrollResolve).toBe(earlierResolve);
             expect(observed()).toBe(204);
@@ -799,6 +800,7 @@ describe("end maintenance request ownership", () => {
             finishScrollTo(ctx);
             await Promise.resolve();
             updateItemSizes(ctx, { itemKey: "tail", size: { height: 4104, width: 200 } });
+            await Promise.resolve();
             for (let count = 0; frames.length && count < 10; count++) frames.shift()?.(count * 16);
             expect(ctx.state.props.data).toBe(data);
             expect(observed()).toBe(4204);
@@ -912,7 +914,7 @@ describe("end follow rearm after settling", () => {
             expect(follow.doMaintainScrollAtEnd(ctx)).toBe(false);
         });
 
-        it(`keeps rearmed intent when the next measurement moves the end outside the threshold on ${platform}`, () => {
+        it(`keeps rearmed intent when the next measurement moves the end outside the threshold on ${platform}`, async () => {
             const ctx = setupAtEnd(platform);
             Object.assign(ctx.state, {
                 endBuffered: 2,
@@ -924,6 +926,7 @@ describe("end follow rearm after settling", () => {
             });
             settleExplicitScroll(ctx, 790);
             updateItemSizes(ctx, { itemKey: "row", size: { height: 1200, width: 200 } });
+            await Promise.resolve();
             expect(ctx.values.get("isFollowingEnd")).toBe(true);
             expect(ctx.state.maintainingScrollAtEnd).toBe(platform === "web" ? "instant" : "pending-instant");
         });

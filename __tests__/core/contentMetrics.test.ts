@@ -1,13 +1,78 @@
-import { describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
 import { clampScrollOffset } from "../../src/core/clampScrollOffset";
 import { setContentInsetOverride, setFooterSize, setHeaderSize } from "../../src/core/updateContentMetrics";
 import { updateContentMetricsState } from "../../src/core/updateContentMetricsState";
+import { updateItemSizesBatch } from "../../src/core/updateItemSizes";
 import { Platform } from "../../src/platform/Platform";
 import { getContentSize } from "../../src/state/getContentSize";
+import { checkThresholds } from "../../src/utils/checkThresholds";
+import { createImperativeHandle } from "../../src/utils/createImperativeHandle";
 import * as requestAdjustModule from "../../src/utils/requestAdjust";
 import { createMockContext } from "../__mocks__/createMockContext";
 
 describe("updateContentMetrics", () => {
+    for (const os of ["ios", "android", "web"] as const) {
+        it(`counts native prop insets in content length and clamping only on ios (${os})`, () => {
+            const previous = Platform.OS;
+            Platform.OS = os;
+            try {
+                const ctx = createMockContext(
+                    { totalSize: 1000 },
+                    {
+                        lastLayout: { height: 500, width: 300, x: 0, y: 0 },
+                        props: { contentInset: { bottom: 100 } },
+                        scrollLength: 500,
+                    },
+                );
+                const length = os === "ios" ? 1100 : 1000;
+                expect(getContentSize(ctx)).toBe(length);
+                expect(createImperativeHandle(ctx).getState().contentLength).toBe(length);
+                expect(clampScrollOffset(ctx, 9999)).toBe(length - 500);
+            } finally {
+                Platform.OS = previous;
+            }
+        });
+    }
+
+    for (const change of ["header", "footer", "row"] as const) {
+        it(`rechecks end pagination after ${change} shrink without a scroll`, () => {
+            const onEndReached = mock(() => {});
+            const ctx = createMockContext(
+                { footerSize: 100, headerSize: 100, totalSize: 1000 },
+                {
+                    didContainersLayout: true,
+                    didFinishInitialScroll: true,
+                    positions: [0],
+                    props: {
+                        data: [0],
+                        maintainVisibleContentPosition: { data: false, size: false },
+                        onEndReached,
+                        onEndReachedThreshold: 1,
+                    },
+                    queuedInitialLayout: true,
+                    scroll: 100,
+                    scrollLength: 500,
+                    sizes: new Map([["item_0", 1000]]),
+                    sizesKnown: new Map([["item_0", 1000]]),
+                },
+            );
+            checkThresholds(ctx);
+            expect(onEndReached).not.toHaveBeenCalled();
+            const shrink = () => {
+                if (change === "header") setHeaderSize(ctx, 0);
+                else if (change === "footer") setFooterSize(ctx, 0);
+                else updateItemSizesBatch(ctx, [{ itemKey: "item_0", size: { height: 900, width: 300 } }]);
+            };
+            shrink();
+            expect(onEndReached).toHaveBeenCalledTimes(1);
+            expect(onEndReached).toHaveBeenCalledWith({ distanceFromEnd: 500 });
+            expect(ctx.state.scroll).toBe(100);
+            shrink();
+            expect(onEndReached).toHaveBeenCalledTimes(1);
+            ctx.state.scheduledWork.dispose();
+        });
+    }
+
     it("counts padding on the active scroll axis", () => {
         const ctx = createMockContext(
             {

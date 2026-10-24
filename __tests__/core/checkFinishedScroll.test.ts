@@ -348,12 +348,20 @@ describe("checkFinishedScrollFallback", () => {
     it("settles an unaligned native request after movement stops", () => {
         Platform.OS = "ios";
         const resolveScroll = mock(() => {});
+        const commit = mock(() => {});
         const ctx = createMockContext(
             { totalSize: 1000 },
             {
                 hasScrolled: true,
+                pendingMaintainScrollAtEnd: true,
                 pendingScrollResolve: resolveScroll,
                 scroll: 300,
+                scrollAdjustHandler: {
+                    commitPendingAdjust: commit,
+                    getAdjust: () => 0,
+                    requestAdjust: () => {},
+                    setMounted: () => {},
+                },
                 scrollingTo: {
                     animated: true,
                     index: 5,
@@ -369,6 +377,9 @@ describe("checkFinishedScrollFallback", () => {
         checkFinishedScrollFallback(ctx);
         flushTimers(1);
 
+        expect(commit).toHaveBeenCalledWith();
+        expect(ctx.state.pendingMaintainScrollAtEnd).toBe(false);
+        expect(ctx.state.scroll).toBe(300);
         expect(resolveScroll).toHaveBeenCalledWith();
         expect(ctx.state.pendingScrollResolve).toBeUndefined();
         expect(ctx.state.scrollingTo).toBeUndefined();

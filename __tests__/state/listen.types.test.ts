@@ -19,7 +19,32 @@ for (const [name, entry] of [
     it(`accepts a 3.6.0-shaped listen implementation with typed new keys (${name})`, () => {
         const file = resolve(root, "__tests__/state/listen-consumer.ts");
         const source = `
-import type { LegendListState } from "../../${entry}";
+import type { LegendListRef, LegendListState } from "../../${entry}";
+import type { SectionListRef } from "../../src/section-list/SectionList";
+type Navigation = "cancelScroll" | "scrollToKey" | "getScrollAnchor" | "anchorVisibleContent";
+declare const legacyRef: Omit<LegendListRef, Navigation>;
+declare const legacySection: Omit<SectionListRef, Navigation>;
+const navigation = {
+    cancelScroll: () => {},
+    scrollToKey: async (_params: { key: string }) => {},
+    getScrollAnchor: () => ({ key: "row", offset: 0 }),
+    anchorVisibleContent: (_key: string) => {},
+};
+const completeRef: LegendListRef = { ...legacyRef, ...navigation };
+const completeSection: SectionListRef = { ...legacySection, ...navigation };
+${["cancelScroll", "scrollToKey", "getScrollAnchor", "anchorVisibleContent"]
+    .map(
+        (member) => `
+declare const missing${member}: Omit<LegendListRef, "${member}">;
+// @ts-expect-error every public navigation member is required
+const required${member}: LegendListRef = missing${member};
+declare const sectionMissing${member}: Omit<SectionListRef, "${member}">;
+// @ts-expect-error section refs inherit required navigation members
+const sectionRequired${member}: SectionListRef = sectionMissing${member};
+`,
+    )
+    .join("")}
+
 type LegacyValues = {
     activeStickyIndex: number;
     anchoredEndSpaceSize: number;
@@ -67,9 +92,7 @@ state.listen("unknownKey", () => {});
                 ? ts.createSourceFile(path, source, languageVersion)
                 : getSourceFile(path, languageVersion, ...rest);
         const program = ts.createProgram([file], { ...options, incremental: false, noEmit: true }, host);
-        const diagnostics = ts
-            .getPreEmitDiagnostics(program)
-            .filter((diagnostic) => diagnostic.file?.fileName === file);
+        const diagnostics = program.getSemanticDiagnostics(program.getSourceFile(file));
         expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual(
             [],
         );

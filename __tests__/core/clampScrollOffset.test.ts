@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import "../setup";
 
 import { clampScrollOffset } from "../../src/core/clampScrollOffset";
+import { Platform } from "../../src/platform/Platform";
 import type { StateContext } from "../../src/state/state";
 import { createMockContext } from "../__mocks__/createMockContext";
 
@@ -28,6 +29,17 @@ describe("clampScrollOffset", () => {
 
     it("clamps to the base max offset when no target is provided", () => {
         expect(clampScrollOffset(mockCtx, 550)).toBe(500);
+    });
+
+    it("ignores negative viewOffset only during web initial placement", () => {
+        const previous = Platform.OS;
+        Platform.OS = "web";
+        try {
+            expect(clampScrollOffset(mockCtx, 620, { isInitialScroll: true, viewOffset: -120 })).toBe(500);
+            expect(clampScrollOffset(mockCtx, 620, { isInitialScroll: false, viewOffset: -120 })).toBe(620);
+        } finally {
+            Platform.OS = previous;
+        }
     });
 
     it("extends the max offset for negative viewOffset", () => {

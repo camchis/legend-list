@@ -144,11 +144,53 @@ describe("LegendList imperative scrolls", () => {
             expect(state.scrollingTo).toBeUndefined();
             expect(peek$(ctx, "isScrollActive")).toBe(false);
             expect(settled).toHaveBeenCalledTimes(1);
-            expect(settled).toHaveBeenCalledTimes(1);
         } finally {
             act(() => renderer?.unmount());
         }
     });
+
+    for (const method of [
+        "scrollToIndex",
+        "scrollToOffset",
+        "scrollToItem",
+        "scrollToKey",
+        "scrollToEnd",
+        "scrollIndexIntoView",
+        "scrollItemIntoView",
+    ] as const) {
+        it(`settles a captured ${method} while Suspense hides the list without replaying it`, async () => {
+            const { LegendList } = await import("../../src/components/LegendList?hidden-ref-navigation");
+            const data = createData(100);
+            const ref = React.createRef<LegendListRef>();
+            const tree = (hidden: boolean) => (
+                <React.Suspense fallback={null}>
+                    <LegendList data={data} estimatedItemSize={100} ref={ref} renderItem={() => null} />
+                    <SuspenseGate hidden={hidden} />
+                </React.Suspense>
+            );
+            let renderer: ReturnType<typeof TestRenderer.create>;
+            act(() => {
+                renderer = TestRenderer.create(tree(false));
+            });
+            const captured = ref.current!;
+            const ctx = lastListProps.scrollAdjustHandler.context as StateContext;
+            act(() => renderer!.update(tree(true)));
+            const settled = mock(() => {});
+            void captured[method]({ animated: true, index: 50, item: data[50], key: "item-50", offset: 5000 }).then(
+                settled,
+            );
+            await flushAsync();
+            expect(settled).toHaveBeenCalledTimes(1);
+            expect(ctx.state.scrollingTo).toBeUndefined();
+            expect(scrollToIndexCalls).toHaveLength(0);
+            act(() => renderer!.update(tree(false)));
+            await flushAsync();
+            expect(ctx.state.scrollingTo).toBeUndefined();
+            expect(scrollToIndexCalls).toHaveLength(0);
+            expect(settled).toHaveBeenCalledTimes(1);
+            act(() => renderer!.unmount());
+        });
+    }
 
     it("resolves scrollToEnd against data committed after the imperative call", async () => {
         const { LegendList } = await import("../../src/components/LegendList?imperative-scroll-commit");
