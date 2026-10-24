@@ -239,6 +239,15 @@ export interface InternalState {
     lastFirstVisibleItemCallback?: { index: number; key: string };
     lastNativeScroll?: number;
     lastNativeScrollTime?: number;
+    accessibilityScrollEvent?: {
+        scroll: number;
+        content: number;
+        length: number;
+        adjust: number;
+        time?: number;
+        blocked: boolean;
+        direction: number;
+    };
     lastScrollAdjustForHistory?: number;
     lastScrollDelta: number;
     loadStartTime: number;

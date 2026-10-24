@@ -18,6 +18,7 @@ import { updateItemSizes } from "@/core/updateItemSizes";
 import { updateScroll } from "@/core/updateScroll";
 import { updateViewableItems } from "@/core/viewability";
 import { Platform } from "@/platform/Platform";
+import { isScreenReaderEnabled } from "@/platform/screenReader";
 import { getContentInsetEnd } from "@/state/getContentInsetEnd";
 import { getContentSize } from "@/state/getContentSize";
 import {
@@ -364,6 +365,8 @@ export function createImperativeHandle(
                 return;
             }
             state.viewabilityInsetEnd = next;
+            // The controller scrolls on the UI thread; retain ownership through trailing frames.
+            if (isScreenReaderEnabled()) armAppScrollRearm(ctx);
             if (state.viewabilityConfigCallbackPairs) {
                 // A keyboard can cover stationary content without a scroll event.
                 // Refresh viewability only; occlusion must not initiate scrolling.

@@ -23,6 +23,7 @@ import { warnDevOnce } from "@/utils/helpers";
 import { isInMVCPActiveMode } from "@/utils/isInMVCPActiveMode";
 import { isHorizontalRTL, peekLogicalHorizontalOffset } from "@/utils/rtl";
 import { useRafCoalescer } from "@/utils/useRafCoalescer";
+import { getWheelGesture, normalizeWheelDelta, type WheelGesture } from "@/utils/wheelGesture";
 import { observeScrollLayout } from "./observeScrollLayout";
 import {
     LEGEND_LIST_CONTENT_CONTAINER_CLASS,
@@ -348,12 +349,14 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
         onInternalScrollEnd?.();
     }, [onInternalScrollEnd, scrollEventCoalescer]);
 
+    const pointerScrollRef = useRef<(() => void) | undefined>(undefined);
     const handleScroll = useCallback(
         (_event: Event) => {
             if (!onScroll) {
                 return;
             }
 
+            pointerScrollRef.current?.();
             const state = ctx.state;
             if (
                 !hasActiveInitialScroll(state) &&
@@ -398,14 +401,10 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
         const target = getScrollTarget();
         if (!target) return;
         target.addEventListener("scroll", handleScroll, { passive: true });
-        if ("onscrollend" in target) {
-            target.addEventListener("scrollend", emitScrollEnd);
-        }
+        if ("onscrollend" in target) target.addEventListener("scrollend", emitScrollEnd);
         return () => {
             target.removeEventListener("scroll", handleScroll);
-            if ("onscrollend" in target) {
-                target.removeEventListener("scrollend", emitScrollEnd);
-            }
+            target.removeEventListener("scrollend", emitScrollEnd);
             const timeout = scrollEndFallbackRef.current;
             if (timeout !== undefined) {
                 clearTimeout(timeout);
@@ -418,17 +417,23 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
     useEffect(() => {
         const target = getScrollTarget();
         if (!target) return;
-        const interrupt = (event: Event, direction = -1) => {
+        const isExplicitNavigation = () => {
             const state = ctx.state;
-            // Imperative navigation yields to accepted input in either direction.
-            // Automatic end following still ignores input toward the end.
-            const isExplicitNavigation =
+            const initial = state.initialScroll;
+            if (hasActiveInitialScroll(state)) {
+                return !(initial?.viewPosition === 1 && initial.index === state.props.data.length - 1);
+            }
+            return !!(
                 (state.scrollingTo &&
                     !state.scrollingTo.isInitialScroll &&
                     (!state.scrollingTo.isScrollToEnd ||
                         (state.pendingScrollResolve && !state.maintainingScrollAtEnd))) ||
-                (state.endFollowInterrupted && state.pendingScrollResolve);
-            if (direction > 0 && !isExplicitNavigation) return;
+                (state.endFollowInterrupted && state.pendingScrollResolve)
+            );
+        };
+        const acceptInput = (event: Event, direction: number, isNew = true, keepsExplicitOwner = false) => {
+            const state = ctx.state;
+            const explicit = isExplicitNavigation();
             const node = resolveScrollableNode(scrollRef.current, externalTarget);
             const maxOffset = getMaxScrollOffset();
             const offset = peekLogicalHorizontalOffset(state, getCurrentScrollOffset(), maxOffset);
@@ -436,39 +441,54 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
                 !event.defaultPrevented &&
                 node &&
                 maxOffset > 1 &&
-                (isExplicitNavigation || (direction > 0 ? offset < maxOffset - 1 : offset > 1)) &&
+                (explicit || direction === 0 || (direction > 0 ? offset < maxOffset - 1 : offset > 1)) &&
                 isScrollInRange() &&
                 ownsScrollInput(event.target, node, horizontal)
             ) {
-                interruptUserScroll(ctx);
+                // A wheel tail that predates a command keeps its gesture owner.
+                if (explicit ? !keepsExplicitOwner : direction <= 0) interruptUserScroll(ctx);
+                if (isNew) state.props.onUserScroll?.();
+                return true;
             }
+            return false;
         };
+        let wheelGesture: WheelGesture | undefined;
         const inputDirection = (delta: number) => (isHorizontalRTL(ctx.state) ? -delta : delta);
         const onWheel = (nativeEvent: Event) => {
             const event = nativeEvent as WheelEvent;
             const delta = horizontal ? event.deltaX || (event.shiftKey ? event.deltaY : 0) : event.deltaY;
-            if (delta !== 0 && !event.ctrlKey && !event.defaultPrevented) interrupt(event, inputDirection(delta));
+            if (delta !== 0 && !event.ctrlKey && !event.defaultPrevented) {
+                wheelGesture = getWheelGesture(
+                    wheelGesture,
+                    normalizeWheelDelta(delta, event.deltaMode, ctx.state.scrollLength),
+                    event.timeStamp,
+                    (event as WheelEvent & { momentum?: boolean }).momentum,
+                );
+                acceptInput(event, inputDirection(delta), wheelGesture.isNew, !wheelGesture.isNew);
+            }
         };
         let lastTouch: number | undefined;
+        let touchAccepted = false;
         const onTouchStart = (nativeEvent: Event) => {
             const touch = (nativeEvent as TouchEvent).touches[0];
             lastTouch = touch ? (horizontal ? touch.clientX : touch.clientY) : undefined;
-            if (ctx.state.scrollingTo && ctx.state.pendingScrollResolve && !ctx.state.maintainingScrollAtEnd) {
-                interrupt(nativeEvent, 0);
-            }
+            touchAccepted = false;
+            if (lastTouch !== undefined && isExplicitNavigation()) acceptInput(nativeEvent, 0, false);
         };
         const onTouchMove = (nativeEvent: Event) => {
             const touch = (nativeEvent as TouchEvent).touches[0];
             if (!touch) return;
             const position = horizontal ? touch.clientX : touch.clientY;
             if (lastTouch !== undefined && position !== lastTouch)
-                interrupt(nativeEvent, inputDirection(lastTouch - position));
+                touchAccepted =
+                    acceptInput(nativeEvent, inputDirection(lastTouch - position), !touchAccepted) || touchAccepted;
             lastTouch = position;
         };
         const onKeyDown = (nativeEvent: Event) => {
             const event = nativeEvent as KeyboardEvent;
             const element = event.target as HTMLElement | null;
             if (
+                event.repeat ||
                 event.defaultPrevented ||
                 element?.closest?.(
                     "input, textarea, select, button, a, summary, [contenteditable=true], [role=button], [role=checkbox], [role=radio], [role=menu], [role=menuitem], [role=listbox], [role=combobox], [role=slider], [role=tab], [role=tree]",
@@ -476,40 +496,52 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
             )
                 return;
             if (horizontal && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-                interrupt(event, inputDirection(event.key === "ArrowLeft" ? -1 : 1));
+                acceptInput(event, inputDirection(event.key === "ArrowLeft" ? -1 : 1));
             } else if (
                 (horizontal ? event.key === "ArrowLeft" : event.key === "ArrowUp") ||
                 event.key === "PageUp" ||
                 event.key === "Home" ||
                 (event.key === " " && event.shiftKey)
             )
-                interrupt(event);
+                acceptInput(event, -1);
             else if (
                 (horizontal ? event.key === "ArrowRight" : event.key === "ArrowDown") ||
                 event.key === "PageDown" ||
                 event.key === "End" ||
                 event.key === " "
             )
-                interrupt(event, 1);
+                acceptInput(event, 1);
+        };
+        const onPointerEnd = () => {
+            pointerScrollRef.current = undefined;
         };
         const onPointerDown = (nativeEvent: Event) => {
+            onPointerEnd();
             const event = nativeEvent as PointerEvent;
             const element = resolveScrollableNode(scrollRef.current, externalTarget);
-            if (event.target !== element || !element) return;
+            if (event.target !== element || !element || event.pointerType === "touch") return;
             const rect = element.getBoundingClientRect();
-            if (
-                horizontal
-                    ? event.clientY >= rect.top + element.clientHeight
-                    : event.clientX >= rect.left + element.clientWidth
-            )
-                interrupt(event);
+            const inGutter = horizontal
+                ? event.clientY >= rect.top + element.clientHeight
+                : event.clientX >= rect.left + element.clientWidth;
+            if (inGutter && acceptInput(event, 0)) return;
+            const offset = getCurrentScrollOffset();
+            pointerScrollRef.current = () => {
+                if (offset !== getCurrentScrollOffset() && acceptInput(event, 0)) onPointerEnd();
+            };
         };
+        const pointerTarget = scrollRef.current?.ownerDocument ?? target;
+        pointerTarget.addEventListener("pointerup", onPointerEnd, true);
+        pointerTarget.addEventListener("pointercancel", onPointerEnd, true);
         target.addEventListener("wheel", onWheel, { passive: true });
         target.addEventListener("touchstart", onTouchStart, { passive: true });
         target.addEventListener("touchmove", onTouchMove, { passive: true });
         target.addEventListener("keydown", onKeyDown);
         target.addEventListener("pointerdown", onPointerDown);
         return () => {
+            onPointerEnd();
+            pointerTarget.removeEventListener("pointerup", onPointerEnd, true);
+            pointerTarget.removeEventListener("pointercancel", onPointerEnd, true);
             target.removeEventListener("wheel", onWheel);
             target.removeEventListener("touchstart", onTouchStart);
             target.removeEventListener("touchmove", onTouchMove);

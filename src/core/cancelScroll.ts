@@ -60,5 +60,4 @@ export function interruptUserScroll(ctx: StateContext) {
         ctx.state.scrollElementTarget = undefined;
         set$(ctx, "isScrollActive", !!ctx.state.isDragging || !!ctx.state.isMomentumScrolling);
     }
-    ctx.state.props.onUserScroll?.();
 }

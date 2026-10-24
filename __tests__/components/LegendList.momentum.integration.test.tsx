@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
 import * as React from "react";
@@ -6,6 +6,7 @@ import { Text } from "react-native";
 
 import * as platformScroll from "../../src/core/doScrollTo";
 import { doScrollTo as doNativeScrollTo } from "../../src/core/doScrollTo.native";
+import * as screenReader from "../../src/platform/screenReader";
 import type { LegendListRef } from "../../src/types.base";
 import { act, render } from "../helpers/testingLibrary";
 
@@ -36,6 +37,7 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
     let scrollProps: any;
     const writes: Array<{ animated: boolean; y: number }> = [];
     const events: string[] = [];
+    const onUserScroll = mock(() => {});
     // Keep the list, layout, follow scheduling, and gesture handlers real.
     // Substitute only the native view, recording its imperative scroll commands.
     const ScrollSurface = React.forwardRef(function MomentumScrollSurface(props: any, forwardedRef: React.Ref<any>) {
@@ -63,6 +65,7 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
             onScrollBeginDrag={() => events.push("dragBegin")}
             onScrollEndDrag={() => events.push("dragEnd")}
             onScrollToTop={() => events.push("scrollToTop")}
+            onUserScroll={onUserScroll}
             recycleItems={false}
             ref={ref}
             renderItem={({ item }: { item: { id: string } }) => <Text>{item.id}</Text>}
@@ -101,6 +104,7 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
         endDrag: () => act(() => scrollProps.onScrollEndDrag(event(690))),
         endMomentum: () => act(() => scrollProps.onMomentumScrollEnd(event(ref.current!.getState().scroll))),
         events,
+        onUserScroll,
         // Prepending shifts the reader's offset through MVCP, so the growth is
         // already served and must not become settle-time follow credit.
         prepend: async (amount: number) => {
@@ -116,10 +120,26 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
     };
 }
 
-describe("native end following during momentum", () => {
+describe.each([false, true])("native end following during momentum (screen reader %s)", (enabled) => {
     beforeEach(() => {
+        spyOn(screenReader, "isScreenReaderEnabled").mockReturnValue(enabled);
         // Bun resolves .ts by default; Metro resolves this dependency to .native.ts.
         spyOn(platformScroll, "doScrollTo").mockImplementation(doNativeScrollTo);
+    });
+
+    it("reports one drag gesture through momentum, and one status-bar gesture", async () => {
+        const list = await mountFollowingList();
+        expect(list.onUserScroll).not.toHaveBeenCalled();
+        list.beginDrag();
+        list.scroll(650);
+        list.endDrag();
+        list.beginMomentum();
+        list.scroll(500);
+        list.endMomentum();
+        expect(list.onUserScroll).toHaveBeenCalledTimes(1);
+        list.scrollToTop();
+        expect(list.onUserScroll).toHaveBeenCalledTimes(2);
+        list.unmount();
     });
 
     it("releases end following after a status-bar scroll and preserves the app callback", async () => {
@@ -132,14 +152,39 @@ describe("native end following during momentum", () => {
         await flushFrames();
         expect(list.ref.current!.getState().isFollowingEnd).toBe(true);
         list.writes.length = 0;
+        list.scroll(650);
+        list.scroll(400);
         list.scroll(0);
+        // UIKit can finish well after its last rounded/subpixel scroll frame.
+        const completedAt = Date.now() + 1000;
+        spyOn(Date, "now").mockReturnValue(completedAt);
         list.scrollToTop();
         await list.append();
         expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
         expect(list.ref.current!.getState().scroll).toBe(0);
         expect(list.writes).toEqual([]);
         expect(list.events).toEqual(["scrollToTop"]);
+        expect(list.onUserScroll).toHaveBeenCalledTimes(1);
+        list.scrollToTop();
+        expect(list.onUserScroll).toHaveBeenCalledTimes(2);
         list.unmount();
+    });
+
+    it("accepts accessibility input after a drag with no momentum pair settles", async () => {
+        const list = await mountFollowingList();
+        try {
+            list.beginDrag();
+            list.endDrag();
+            await act(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 150));
+            });
+            list.scroll(700);
+            list.scroll(650);
+            list.scroll(500);
+            expect(list.onUserScroll).toHaveBeenCalledTimes(enabled ? 2 : 1);
+        } finally {
+            list.unmount();
+        }
     });
 
     it("resolves an active end request as unreachable on unmount", async () => {

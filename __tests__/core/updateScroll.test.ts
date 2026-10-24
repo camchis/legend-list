@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup"; // Import global test setup
 
-import { interruptUserScroll } from "@/core/cancelScroll";
 import * as doMaintainScrollAtEndModule from "@/core/doMaintainScrollAtEnd";
 import { updateScroll } from "@/core/updateScroll";
 import * as flushSyncModule from "@/platform/flushSync";
@@ -696,23 +695,16 @@ describe("updateScroll user scroll ownership", () => {
         return { ctx, onUserScroll };
     }
 
-    it("reports each user scroll once on web and leaves native user scrolls to drag callbacks", () => {
-        Platform.OS = "web";
-        const plain = createUserScrollContext();
-        updateScroll(plain.ctx, 550, true, { fromNativeScrollEvent: true });
-        expect(plain.onUserScroll).toHaveBeenCalledTimes(1);
-
-        const following = createUserScrollContext(true);
-        updateScroll(following.ctx, 400, true, { fromNativeScrollEvent: true });
-        expect(peek$(following.ctx, "isFollowingEnd")).toBe(false);
-        expect(following.onUserScroll).toHaveBeenCalledTimes(1);
-
-        Platform.OS = "ios";
-        const native = createUserScrollContext();
-        updateScroll(native.ctx, 550, true, { fromNativeScrollEvent: true });
-        expect(native.onUserScroll).not.toHaveBeenCalled();
-        interruptUserScroll(native.ctx);
-        expect(native.onUserScroll).toHaveBeenCalledTimes(1);
+    it("never reports user input from unowned web or native offset events", () => {
+        for (const platform of ["web", "ios"] as const) {
+            Platform.OS = platform;
+            for (const following of [false, true]) {
+                const { ctx, onUserScroll } = createUserScrollContext(following);
+                updateScroll(ctx, 400, true, { fromNativeScrollEvent: true });
+                updateScroll(ctx, 350, true, { fromNativeScrollEvent: true });
+                expect(onUserScroll).not.toHaveBeenCalled();
+            }
+        }
     });
 
     it("releases the reader anchor and DOM target only for user scroll events", () => {

@@ -252,6 +252,8 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
     /**
      * If true, auto-scrolls to end when new items are added.
      * Use an options object to opt into specific triggers and control whether that scroll is animated.
+     * With a native screen reader enabled, unowned accessibility scrolls toward the start
+     * release following. Assistive-tech scrolls during library animations are not detected.
      * @default false
      */
     maintainScrollAtEnd?: boolean | MaintainScrollAtEndOptions;
@@ -375,7 +377,21 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
     onRefresh?: () => void;
 
     /**
-     * Called when user navigation interrupts list-owned scrolling or moves the web viewport.
+     * Called once per accepted user gesture, in either direction: native drag (including
+     * momentum), web wheel/touch movement, non-repeated scroll keydown, or scrollbar drag.
+     * Wheel input at a boundary is ignored unless navigation is active. Without wheel
+     * momentum metadata, gesture boundaries are inferred from timing, direction and force.
+     * iOS status-bar scrolling emits on native onScrollToTop unless accessibility motion
+     * already reported it during the animation.
+     * With a native screen reader enabled, otherwise unowned scroll motion with stable
+     * content/viewport size is inferred as accessibility input (including focus navigation),
+     * once per burst; motion toward the start releases end following. Library animations
+     * and controller/native-ref command windows mask assistive-tech scrolling.
+     * Native commands bypassing the list and its refs (e.g. Reanimated worklets) can also
+     * count as accessibility input. Layout/clamp/MVCP events and commands through the
+     * list or its refs do not emit it.
+     * @experimental Native pointer/wheel-only input without a screen reader is not detected.
+     * Web scrollbar detection requires pointer events on the scroller.
      */
     onUserScroll?: () => void;
 

@@ -17,6 +17,7 @@ import { useStableRenderComponent } from "@/hooks/useStableRenderComponent";
 import { LayoutView } from "@/platform/LayoutView";
 import { Platform } from "@/platform/Platform";
 import { StyleSheet } from "@/platform/StyleSheet";
+import { isScreenReaderEnabled } from "@/platform/screenReader";
 import type {
     LayoutChangeEvent,
     LayoutRectangle,
@@ -189,6 +190,16 @@ export const ListComponent = typedMemo(function ListComponent<ItemT>({
     const onScrollToTopInternal = useCallback(
         (event: NativeSyntheticEvent<NativeScrollEvent>) => {
             interruptUserScroll(ctx);
+            const accessibility = ctx.state.accessibilityScrollEvent;
+            // UIKit completion can trail the final subpixel frames beyond the burst idle gap.
+            const alreadyReported =
+                isScreenReaderEnabled() &&
+                accessibility?.time !== undefined &&
+                !accessibility.blocked &&
+                accessibility.direction === -1 &&
+                accessibility.scroll <= 1;
+            if (accessibility) accessibility.time = undefined;
+            if (!alreadyReported) ctx.state.props.onUserScroll?.();
             onScrollToTop?.(event);
         },
         [ctx, onScrollToTop],

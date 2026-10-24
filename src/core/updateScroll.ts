@@ -101,7 +101,6 @@ export function updateScroll(
         interruptUserScroll(ctx);
     }
     if (isUserScrollEvent) {
-        if (Platform.OS === "web" && !didCancelMaintainScrollAtEnd) state.props.onUserScroll?.();
         state.visibleContentAnchor = undefined;
         state.scrollElementTarget = undefined;
         if (newScroll > prevScroll && getContentSize(ctx) - newScroll - state.scrollLength <= 1) {

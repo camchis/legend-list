@@ -60,6 +60,7 @@ import { Platform } from "@/platform/Platform";
 import type { LayoutRectangle, NativeScrollEvent, NativeSyntheticEvent } from "@/platform/platform-types";
 import { RefreshControl } from "@/platform/RefreshControl";
 import { StyleSheet } from "@/platform/StyleSheet";
+import { subscribeScreenReader } from "@/platform/screenReader";
 import type { LooseScrollView, LooseScrollViewProps, LooseView, ViewStyle } from "@/platform/scrollview-types";
 import { useStickyScrollHandler } from "@/platform/useStickyScrollHandler";
 import { getContentSize } from "@/state/getContentSize";
@@ -133,6 +134,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
     props: LegendListInnerProps<T>,
     forwardedRef: ForwardedRef<LegendListRef>,
 ) {
+    useEffect(subscribeScreenReader, []);
     const noopOnScroll = useCallback((_event: NativeSyntheticEvent<NativeScrollEvent>) => {}, []);
     if (props.recycleItems === undefined) {
         warnDevOnce(
@@ -948,6 +950,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
                 state.momentumStallFirstLateFireAt = undefined;
                 state.isDragging = true;
                 interruptUserScroll(ctx);
+                state.props.onUserScroll?.();
                 prepareReachedEdgeForNextUserScroll(ctx);
                 state.props.onScrollBeginDrag?.(event as any);
             },
