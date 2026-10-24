@@ -6,13 +6,16 @@
 
     `scrollToIndex` and `scrollToOffset` clamp out-of-range targets and resolve once landed. Index-based navigation and `scrollToEnd` on empty data resolve without scrolling, including when a header or footer is present.
 
-- Types: new required members on `LegendListRef` / state since 3.6.0. Code that implements or mocks these types must add:
+- Types: new required members on `LegendListRef` / state since 3.6.0. These stay required, and code that implements or mocks these types must add them:
 
-    - `LegendListRef` (native and web): `cancelScroll`, `scrollToKey`, `getScrollAnchor`, `anchorVisibleContent`.
-    - `LegendListState`: `distanceFromEnd`, `isFollowingEnd`.
-    - `SectionListRef`: `cancelScroll`, `scrollToKey`, `getScrollAnchor`, `anchorVisibleContent` (inherited from `LegendListRef`).
+    - `LegendListRef` (native and web): `cancelScroll`, `scrollToKey`, `anchorVisibleContent`.
+    - `LegendListState`: `distanceFromEnd`, `isFollowingEnd`. `dataKey` is added as optional.
+    - `SectionListRef`: `cancelScroll`, `scrollToKey`, `anchorVisibleContent` (inherited from `LegendListRef`). Key-based methods use the flattened keys `${sectionKey}:item:${itemKey}`, `${sectionKey}:header`, `${sectionKey}:footer`, `${sectionKey}:separator:${itemIndex}`, and `${sectionKey}:section-separator`, where `sectionKey` is the section's key or `section-${sectionIndex}`.
+    - `LegendListMetrics`, the `onMetricsChange` payload: unchanged from 3.6.0, still `headerSize` and `footerSize`. Scroll position and end-distance fields added during the cycle were removed before release.
 
-- Feat: Add ref methods `cancelScroll` to stop queued and active scrolling, `scrollToKey` to navigate by stable item key through prepends, `getScrollAnchor` to capture the first visible item and its offset, and `anchorVisibleContent` to keep a visible item in place through layout changes.
+    `getState().listen` accepts the new `isFollowingEnd` key. `distanceFromEnd` is not a listen key; read `getState().distanceFromEnd`, which is computed on demand. 3.6.0-shaped `listen` implementations remain assignable.
+
+- Feat: Add ref methods `cancelScroll` to stop queued and active scrolling, `scrollToKey` to navigate by stable item key through prepends, and `anchorVisibleContent` to capture an item's key and viewport offset and hold it through layout changes (the first visible item by default). Pass `{ key }` to choose an item, or use `anchorVisibleContent({ hold: false })` for a snapshot without side effects. Returns `undefined` before initial placement, during dataset replacement, or if no item is found; at the end while following, it returns the anchor without interrupting end following.
 - Feat: Add `viewportMargin: { start, end }` to `scrollIndexIntoView` to keep space clear at the start and end of the viewport along the scroll axis.
 - Feat: Expose `distanceFromEnd`, `isFollowingEnd`, and `dataKey` through `getState()`, and accept `isFollowingEnd` in `getState().listen`.
 - Feat: Add boolean `maintainScrollAtEnd.on.dataAppend` to follow only additions that preserve existing item keys in order; `on.dataChange` remains a boolean option for all data changes.
@@ -28,11 +31,16 @@
 - Fix: Animated end following stays aligned through short-list growth, footer and viewport changes, late row measurements, and native drag-to-momentum handoffs. #563 #568
 - Fix: Automatic native end following waits for a drag and its momentum to settle, then catches up near the end using the configured threshold.
 - Fix: Keyed scroll targets survive prepends and same-key item updates, cached dataset switches restart initial placement, and fixed-size updates and cache clearing preserve the reader's anchor.
-- Fix: `scrollToOffset` can reach `contentContainerStyle` minimum sizes, and horizontal RTL web lists use the scroll owner's direction for offsets.
+- Fix: `scrollToOffset` can reach `contentContainerStyle` minimum sizes, horizontal RTL web lists use the scroll owner's direction for offsets, and horizontal RTL scroll-offset conversion keeps numeric `minWidth` in the physical content extent.
 - Fix: When `getFixedItemSize` is set, changing `extraData` invalidates all fixed sizes and repositions the data.
 - Fix: Inline `onMetricsChange` callbacks no longer cause repeated metrics emissions.
+- Fix: End following rearms when a scroll or gesture settles within `maintainScrollAtEndThreshold`, so new content resumes following after `scrollToIndex`/`scrollToOffset` or a small nudge that stays near the end.
+- Fix: When `getFixedItemSize` starts returning sizes for rows that were already measured, their stale measurements are dropped and the fixed sizes are applied, including rows reordered in the same render.
+- Fix: Web lists follow the end in one painted frame when every row grows after a mount or `dataKey` switch, instead of clamping against the stale content extent and catching up a frame late.
+- Fix: On Fabric, the native content extent commits in the same render pass as row positions, so shrinking content cannot briefly leave rows mispositioned.
+- Fix: TODO(keyboard-close): smooth keyboard close improvement, pending merge from a separate branch.
 - Fix: `AnimatedLegendList` `itemLayoutAnimation` no longer animates rows while scrolling, during list scroll commands, or after layout adjustments, and skips the transition when a container switches items even without `recycleItems`.
-- Fix: Keyboard occlusion is excluded from viewability calculations, horizontal viewability uses the correct start padding including RTL, and native content insets are counted only where applied.
+- Fix: Keyboard occlusion is excluded from viewability calculations, horizontal viewability uses the correct start padding including RTL, native content insets are counted only where applied, and `KeyboardAwareLegendList` keeps the static `contentInset` prop out of Android keyboard inset reports so it is not counted twice.
 - Fix: `scrollMessageToEnd({ closeKeyboard: true })` unfreezes keyboard tracking and waits for dismissal before scrolling to the end, so its target uses the final keyboard inset.
 - Perf: With `recycleItems` enabled, reuse warm offscreen rows before empty containers, and skip key extraction for unchanged append prefixes.
 
