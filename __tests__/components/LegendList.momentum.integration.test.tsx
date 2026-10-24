@@ -517,15 +517,15 @@ describe.each([false, true])("native end following during momentum (screen reade
             await flushFrames();
             expect(keyedSettled).toBe(true);
             expect(placedSettled).toBe(false);
-            // The replaced animation stops where it was observed before the new target dispatches.
-            expect(list.writes.map(({ y }) => y)).toEqual([100, 600, 300]);
+            // The new animated target takes over the motion directly, without a plain stop.
+            expect(list.writes.map(({ y }) => y)).toEqual([100, 300]);
             expect(handle.getState().isFollowingEnd).toBe(false);
 
             list.scroll(300);
             await flushFrames();
             expect(placedSettled).toBe(true);
             await list.append();
-            expect(list.writes.map(({ y }) => y)).toEqual([100, 600, 300]);
+            expect(list.writes.map(({ y }) => y)).toEqual([100, 300]);
 
             // Landing within the end threshold resumes following as before.
             placedSettled = false;

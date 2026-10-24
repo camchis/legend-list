@@ -7,12 +7,12 @@ import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";
 import { peek$, type StateContext } from "@/state/state";
 
-export function cancelScroll(ctx: StateContext, stopAnimation = true) {
+export function cancelScroll(ctx: StateContext, stopAnimation = true, commitAdjust = true) {
     const { state } = ctx;
-    const wasAnimating = !!state.scrollingTo?.animated;
-    const scroller = state.refScroller.current;
     // Without a native observation, scrollPending has not yet absorbed deferred adjustments.
     const observed = getObservedScrollOffset(ctx, peek$(ctx, "scrollAdjustPending") ? state.scrollPending : undefined);
+    // A superseded animation keeps running natively while its replacement waits to dispatch.
+    const wasAnimating = !!state.scrollingTo?.animated || !!ctx.scrollRequestTracker?.cancel();
     releaseScrollOwners(ctx, true);
     state.scrollPending = observed;
     // Deferred adjustments are not applied natively yet, so the observed offset is current even
@@ -21,16 +21,21 @@ export function cancelScroll(ctx: StateContext, stopAnimation = true) {
     if (peek$(ctx, "scrollAdjustPending")) state.ignoreScrollFromMVCP = undefined;
     updateScroll(ctx, observed, true, { markHasScrolled: false });
     state.ignoreScrollFromMVCP = ignoreScrollFromMVCP;
-    if (wasAnimating && stopAnimation) {
-        // Stop at the scroller's own raw offset when it reports one, avoiding an RTL round trip.
-        const x = state.props.horizontal
-            ? (scroller?.getCurrentScrollOffset?.() ?? getNativeScrollPoint(ctx, observed).x)
-            : 0;
-        scroller?.scrollTo({ animated: false, x, y: state.props.horizontal ? 0 : observed });
-    }
-    // Apply MVCP adjustments deferred during the cancelled animation now; otherwise
-    // the next request's finishScrollTo would apply them to its own target.
-    state.scrollAdjustHandler.commitPendingAdjust();
+    if (wasAnimating && stopAnimation) stopScrollAnimation(ctx, observed);
+    // Apply MVCP adjustments deferred during the cancelled animation now, or mark them superseded
+    // so the replacement's finishScrollTo does not add them to its own offset target.
+    if (commitAdjust) state.scrollAdjustHandler.commitPendingAdjust();
+    else state.scrollAdjustHandler.supersedePendingAdjust();
+}
+
+export function stopScrollAnimation(ctx: StateContext, observed = getObservedScrollOffset(ctx)) {
+    const { state } = ctx;
+    const scroller = state.refScroller.current;
+    // Stop at the scroller's own raw offset when it reports one, avoiding an RTL round trip.
+    const x = state.props.horizontal
+        ? (scroller?.getCurrentScrollOffset?.() ?? getNativeScrollPoint(ctx, observed).x)
+        : 0;
+    scroller?.scrollTo({ animated: false, x, y: state.props.horizontal ? 0 : observed });
 }
 
 function releaseScrollOwners(ctx: StateContext, supersedeInitial: boolean) {

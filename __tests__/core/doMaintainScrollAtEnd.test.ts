@@ -554,6 +554,21 @@ describe("doMaintainScrollAtEnd", () => {
             expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
         });
 
+        it("replays a coalesced non-animated android follow after the queued one lands", async () => {
+            Platform.OS = "android";
+            runMaintainScrollAtEnd(false);
+            // The content-size change after the append; native may clamp the first command to the old extent.
+            runMaintainScrollAtEnd(false);
+            rafCallback?.();
+            expect(mockRunTrackedScrollToEnd).toHaveBeenCalledTimes(1);
+
+            await finishNextImperativeScroll();
+            expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(2);
+            rafCallback?.();
+            expect(mockRunTrackedScrollToEnd).toHaveBeenCalledTimes(2);
+            expect(scrollToEndSpy).toHaveBeenLastCalledWith(mockCtx, { animated: false });
+        });
+
         it("cancels coalesced maintain requests when the scroll position changes away from the end", () => {
             const result = runMaintainScrollAtEnd(false);
 

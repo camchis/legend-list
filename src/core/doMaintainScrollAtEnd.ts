@@ -247,7 +247,13 @@ export function doMaintainScrollAtEnd(ctx: StateContext, options?: { immediate?:
         } else {
             state.scheduledWork.frame(run, "maintainScrollAtEnd");
         }
-    } else if (state.maintainingScrollAtEnd === "animated" || state.maintainingScrollAtEnd === "instant") {
+    } else if (
+        state.maintainingScrollAtEnd === "animated" ||
+        state.maintainingScrollAtEnd === "instant" ||
+        // Android clamps an instant command to the extent it has laid out, which can still be the
+        // pre-append one; replay the coalesced follow once the first command lands.
+        (Platform.OS === "android" && state.maintainingScrollAtEnd === "pending-instant")
+    ) {
         // A queued frame already targets the latest end. Only work arriving
         // after its command starts needs a follow-up pass.
         state.pendingMaintainScrollAtEnd = true;

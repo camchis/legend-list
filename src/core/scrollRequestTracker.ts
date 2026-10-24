@@ -1,5 +1,5 @@
 import { settlePendingImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
-import { cancelScroll } from "@/core/cancelScroll";
+import { cancelScroll, stopScrollAnimation } from "@/core/cancelScroll";
 import { interruptMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
 import { type StateContext, set$ } from "@/state/state";
 import type { ScrollResolve } from "@/types.internal";
@@ -7,7 +7,8 @@ import type { ScrollResolve } from "@/types.internal";
 export type ScrollRequestRun = () => boolean | "unreachable";
 
 export interface ScrollRequestTracker {
-    cancel(): void;
+    /** Returns whether a superseded animation was still owed a native stop. */
+    cancel(): boolean;
     isCurrent(token: number): boolean;
     isWaitingToRun(): boolean;
     runNow(token: number, resolve: ScrollResolve, run: ScrollRequestRun): void;
@@ -19,13 +20,17 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
     if (!ctx.scrollRequestTracker) {
         let currentToken = 0;
         let waitingToken: number | undefined;
+        let stopToken: number | undefined;
 
         const start = (resolve: ScrollResolve, isInternal = false) => {
             const state = ctx.state;
+            const supersedesAnimation = !isInternal && !!state.scrollingTo?.animated;
             // A newer explicit target supersedes automatic end-follow intent.
             if (!isInternal) {
-                // A visible replacement may dispatch nothing, so stop the superseded motion first.
-                if (state.scrollingTo?.animated) cancelScroll(ctx);
+                // Release the superseded motion now, but stop it and apply its deferred adjustments
+                // only if the replacement dispatches nothing: on Android either one cancels the
+                // next animation, so a dispatching replacement commits them when it finishes.
+                if (supersedesAnimation) cancelScroll(ctx, false, false);
                 state.scheduledWork.cancel("appScrollRearm");
                 state.pendingEndMeasurements = undefined;
                 state.visibleContentAnchor = undefined;
@@ -34,6 +39,8 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
             }
             state.scheduledWork.cancel("imperativeScrollReady");
             const token = ++currentToken;
+            // A replacement still waiting to run carries its pending stop to the next request.
+            stopToken = supersedesAnimation || stopToken !== undefined ? token : undefined;
 
             settlePendingImperativeScroll(state);
             state.pendingScrollResolve = resolve;
@@ -51,6 +58,13 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
 
             waitingToken = undefined;
             const didStartScroll = run();
+            if (stopToken === token) {
+                stopToken = undefined;
+                if (didStartScroll !== true) {
+                    stopScrollAnimation(ctx);
+                    state.scrollAdjustHandler.commitPendingAdjust();
+                }
+            }
             if (didStartScroll === "unreachable") {
                 cancelScroll(ctx);
                 return;
@@ -67,8 +81,11 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
 
         ctx.scrollRequestTracker = {
             cancel: () => {
+                const owedStop = stopToken !== undefined;
                 currentToken++;
                 waitingToken = undefined;
+                stopToken = undefined;
+                return owedStop;
             },
             isCurrent: (token) => token === currentToken,
             isWaitingToRun: () => waitingToken === currentToken && !!ctx.state.pendingScrollResolve,

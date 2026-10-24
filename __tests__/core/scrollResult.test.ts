@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
 import { calculateItemsInView } from "@/core/calculateItemsInView";
@@ -10,9 +10,11 @@ import { finishInitialScroll } from "@/core/finishInitialScroll";
 import { handleLayout } from "@/core/handleLayout";
 import { resetLayoutCachesForDataChange } from "@/core/resetLayoutCachesForDataChange";
 import { updateItemPositions } from "@/core/updateItemPositions";
+import * as platform from "@/platform/Platform";
 import { Platform } from "@/platform/Platform";
 import { createImperativeHandle } from "@/utils/createImperativeHandle";
 import { normalizeMaintainVisibleContentPosition } from "@/utils/normalizeMaintainVisibleContentPosition";
+import { requestAdjust } from "@/utils/requestAdjust";
 import {
     createWebScrollHarness,
     flushMicrotasks,
@@ -33,6 +35,136 @@ afterEach(() => {
 });
 
 describe("imperative scroll results", () => {
+    it("does not stop an animation that a dispatching animated request supersedes", async () => {
+        const h = harness!;
+        const old = trackScroll(h.ref.scrollToIndex({ animated: true, index: 40 }));
+        h.browser.step(100);
+        const next = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
+        await flushMicrotasks();
+        expect(old.resolved).toBe(true);
+        expect(h.scrollToCalls.some((call) => !call.animated)).toBe(false);
+        expect(h.scrollToCalls.at(-1)).toMatchObject({ animated: true, y: 5000 });
+        h.browser.runToEnd();
+        h.clock.advance(100);
+        await flushMicrotasks();
+        expect(next.resolved).toBe(true);
+    });
+
+    describe("with deferred adjustments", () => {
+        beforeEach(async () => {
+            mock.module("@/platform/Platform", () => ({ ...platform, PlatformAdjustBreaksScroll: true }));
+            const { ScrollAdjustHandler } = await import("../../src/core/ScrollAdjustHandler?deferred");
+            harness!.state.scrollAdjustHandler = new ScrollAdjustHandler(harness!.ctx);
+            harness!.ctx.values.set("readyToRender", true);
+        });
+
+        afterEach(() => {
+            mock.module("@/platform/Platform", () => platform);
+        });
+
+        for (const [first, replacement, landing] of [
+            ["scrollToIndex", { animated: true, index: 50 }, 5000],
+            ["scrollToEnd", { animated: true, index: 10 }, 1000],
+            ["scrollToIndex", { animated: true, offset: 500 }, 500],
+        ] as const) {
+            it(`leaves a superseded ${first}'s deferred adjustment to a ${"index" in replacement ? "scrollToIndex" : "scrollToOffset"} replacement's own target`, async () => {
+                const h = harness!;
+                trackScroll(
+                    first === "scrollToEnd"
+                        ? h.ref.scrollToEnd({ animated: true })
+                        : h.ref.scrollToIndex({ animated: true, index: 40 }),
+                );
+                h.browser.step(100);
+                requestAdjust(h.ctx, 100, "item-size");
+                const next = trackScroll(
+                    "index" in replacement ? h.ref.scrollToIndex(replacement) : h.ref.scrollToOffset(replacement),
+                );
+                await flushMicrotasks();
+                // Applying an adjust moves Android's ScrollAdjust anchor, which cancels the replacement's animation.
+                expect(h.ctx.values.get("scrollAdjustPending")).toBe(100);
+                expect(h.scrollToCalls.at(-1)).toMatchObject({ animated: true });
+                h.browser.runToEnd();
+                h.clock.advance(100);
+                await flushMicrotasks();
+                expect(next.resolved).toBe(true);
+                expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
+                expect(h.state.scroll).toBe(landing);
+            });
+        }
+
+        it("commits a superseded animation's deferred adjustments when its replacement stops it", async () => {
+            const h = harness!;
+            trackScroll(h.ref.scrollToIndex({ animated: true, index: 40 }));
+            h.browser.step(100);
+            requestAdjust(h.ctx, 100, "item-size");
+            trackScroll(createImperativeHandle(h.ctx).scrollIndexIntoView({ index: 2 }));
+            await flushMicrotasks();
+            expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
+            expect(h.ctx.values.get("scrollAdjust")).toBe(100);
+        });
+
+        for (const [replacement, landing] of [
+            [{ animated: true, index: 50 }, 5000],
+            [{ animated: true, offset: 800 }, 800],
+        ] as const) {
+            it(`lands a twice-superseded animation's ${"index" in replacement ? "scrollToIndex" : "scrollToOffset"} replacement on its own target`, async () => {
+                const h = harness!;
+                trackScroll(h.ref.scrollToIndex({ animated: true, index: 40 }));
+                h.browser.step(100);
+                requestAdjust(h.ctx, 100, "item-size");
+                trackScroll(h.ref.scrollToOffset({ animated: true, offset: 500 }));
+                await flushMicrotasks();
+                h.browser.step(100);
+                requestAdjust(h.ctx, 50, "item-size");
+                const next = trackScroll(
+                    "index" in replacement ? h.ref.scrollToIndex(replacement) : h.ref.scrollToOffset(replacement),
+                );
+                await flushMicrotasks();
+                h.browser.runToEnd();
+                h.clock.advance(100);
+                await flushMicrotasks();
+                expect(next.resolved).toBe(true);
+                expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
+                expect(h.state.scroll).toBe(landing);
+            });
+        }
+
+        for (const [dataLength, adjust] of [
+            [100, 100],
+            // Empty data clamps the adjusted target (100 + 100) to the max offset 0.
+            [0, -100],
+        ] as const) {
+            it(`commits a superseded animation's deferred adjustment${dataLength ? "" : ", clamped to empty data,"} when its replacement is unreachable`, async () => {
+                const h = harness!;
+                trackScroll(h.ref.scrollToEnd({ animated: true }));
+                h.browser.step(100);
+                requestAdjust(h.ctx, 100, "item-size");
+                if (!dataLength) h.setData(0);
+                const next = trackScroll(h.ref.scrollToItem({ animated: true, item: "missing" as never }));
+                await flushMicrotasks();
+                expect(next.resolved).toBe(true);
+                expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
+                expect(h.ctx.values.get("scrollAdjust")).toBe(adjust);
+            });
+        }
+    });
+
+    it("stops a superseded animation when cancelled before its replacement runs", async () => {
+        const h = harness!;
+        const old = trackScroll(h.ref.scrollToIndex({ animated: true, index: 40 }));
+        h.browser.step(100);
+        h.state.didDataChange = true;
+        const next = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
+        const atCancel = h.browser.offset;
+        h.ref.cancelScroll();
+        await flushMicrotasks();
+        expect(old.resolved).toBe(true);
+        expect(next.resolved).toBe(true);
+        expect(h.browser.destination).toBeUndefined();
+        h.browser.runToEnd();
+        expect(h.browser.offset).toBe(atCancel);
+    });
+
     for (const following of [false, true]) {
         for (const method of ["scrollIndexIntoView", "scrollItemIntoView"] as const) {
             it(`stops superseded ${following ? "end-follow" : "explicit"} motion for an already-visible ${method} target`, async () => {

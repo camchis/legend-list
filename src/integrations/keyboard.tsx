@@ -175,7 +175,7 @@ export function useKeyboardScrollToEnd({ freeze: freezeProp, listRef }: UseKeybo
             const list = listRef.current;
             if (!list) return;
             // Set the request's range before its synchronous native dispatch, without end-follow.
-            if (animated && closeKeyboard && keyboardCloses.get(freeze)?.prepare()) preparedClose.current = true;
+            if (closeKeyboard && keyboardCloses.get(freeze)?.prepare()) preparedClose.current = true;
             const scrollPromise = list.scrollToEnd({ animated });
             const request = ++latestRequest.current;
 
@@ -238,6 +238,8 @@ export const KeyboardAwareLegendList = typedForwardRef(function KeyboardAwareLeg
     const reportedInsets = useRef<KeyboardChatScrollViewContentInsets | undefined>(undefined);
     const initialKeyboardHeight = KeyboardController.state().height;
     const keyboard = useSharedValue({ height: initialKeyboardHeight, progress: initialKeyboardHeight > 0 ? 1 : 0 });
+    // The height the keyboard is moving to; while it is open the controller owns the lift.
+    const keyboardTarget = useSharedValue(initialKeyboardHeight);
     // Worklets deep-copy captured objects; keep only the primitive in the reaction scope.
     const isHorizontal = !!rest.horizontal;
     const reportViewabilityInset = useCallback((inset: number) => {
@@ -255,6 +257,7 @@ export const KeyboardAwareLegendList = typedForwardRef(function KeyboardAwareLeg
             onMove: onKeyboardMove,
             onStart: (event) => {
                 "worklet";
+                keyboardTarget.value = event.height;
                 if (event.height === 0 && !frozenClose.value) closeOffset.value = scrollOffset.value;
                 frozenClose.value = event.height === 0 && !!endScrollFreeze?.value;
             },
@@ -318,14 +321,18 @@ export const KeyboardAwareLegendList = typedForwardRef(function KeyboardAwareLeg
                 };
             }
             reportedInsets.current = insets;
+            const list = refLegendList.current;
             // Frozen controller padding still includes the keyboard when the composer changes.
             if (endScrollFreeze?.value === "animated") {
-                refLegendList.current?.reportContentInsetForScrollInternal?.({ ...insets, bottom: getEndInset() });
+                list?.reportContentInsetForScrollInternal?.({ ...insets, bottom: getEndInset() });
+            } else if (keyboardTarget.value > 0 && list?.reportContentInsetForScrollInternal) {
+                // The controller lifts the content as the keyboard opens; end-follow would fight it.
+                list.reportContentInsetForScrollInternal(insets);
             } else {
-                refLegendList.current?.reportContentInset(insets);
+                list?.reportContentInset(insets);
             }
         },
-        [endScrollFreeze, getEndInset],
+        [endScrollFreeze, getEndInset, keyboardTarget],
     );
     const reportClosingInset = useCallback((bottom: number) => {
         refLegendList.current?.reportContentInset({ ...reportedInsets.current, bottom });

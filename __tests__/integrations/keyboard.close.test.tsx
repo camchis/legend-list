@@ -136,7 +136,7 @@ const mount = async (
     blankSpace: number,
     staticInset = 0,
     openHeight = 300,
-    nativeRequest?: { start: number; maintain: boolean; missingBridge?: boolean },
+    nativeRequest?: { start: number; maintain: boolean; missingBridge?: boolean; following?: boolean },
 ) => {
     const { Platform } = await import("react-native");
     (Platform as any).OS = platform;
@@ -220,7 +220,7 @@ const mount = async (
     const nativeCommands: Array<{ y: number; animated: boolean }> = [];
     const ctx = nativeRequest
         ? createMockContext(
-              { totalSize: 2000 },
+              { isFollowingEnd: !!nativeRequest.following, totalSize: 2000 },
               {
                   didContainersLayout: true,
                   didFinishInitialScroll: true,
@@ -572,6 +572,40 @@ describe("immediate end scroll with frozen keyboard close", () => {
     }
 });
 
+describe("keyboard open at the end", () => {
+    for (const platform of ["ios", "android"]) {
+        it(`${platform}: leaves the opening lift to the controller without an end-follow scroll`, async () => {
+            const freeze = shared(false);
+            const harness = await mount(platform, freeze, 0, 0, 300, {
+                following: true,
+                maintain: true,
+                start: 1240,
+            });
+            try {
+                // Settle at the closed end, then open the keyboard again.
+                for (const name of ["onStart", "onMove", "onEnd"] as const) emit(name, 0);
+                for (let i = 0; i < 4; i++) {
+                    harness.frame();
+                    harness.nativeFrame(1240);
+                    await new Promise((resolve) => setTimeout(resolve, 0));
+                }
+                expect(harness.ctx!.state.maintainingScrollAtEnd).toBeUndefined();
+                harness.nativeCommands.length = 0;
+                for (const name of ["onStart", "onMove", "onEnd"] as const) emit(name, 300);
+                expect(harness.ctx!.state.contentInsetOverride?.bottom).toBe(320);
+                for (let i = 0; i < 4; i++) {
+                    harness.frame();
+                    await new Promise((resolve) => setTimeout(resolve, 0));
+                }
+                expect(harness.nativeCommands).toEqual([]);
+            } finally {
+                harness.ctx!.state.scheduledWork.dispose();
+                harness.unmount();
+            }
+        });
+    }
+});
+
 describe("animated end scroll with frozen keyboard close", () => {
     for (const platform of ["ios", "android"]) {
         for (const maintain of [false, true]) {
@@ -706,7 +740,6 @@ describe("animated end scroll with frozen keyboard close", () => {
                     expect(commands).toHaveLength(0);
                     expect(harness.nativeCommands).toEqual([
                         { animated: true, x: 0, y: 1240 },
-                        { animated: false, x: 0, y: 1380 }, // Existing supersession cancels at the observed offset.
                         { animated: true, x: 0, y: 1240 },
                     ]);
                     expect(harness.ctx!.state.scroll).toBe(1240);
@@ -720,6 +753,38 @@ describe("animated end scroll with frozen keyboard close", () => {
                 }
             });
         }
+        it(`${platform}: sends a non-animated close once, to the closed end`, async () => {
+            const freeze = shared(false);
+            const harness = await mount(platform, freeze, 0, 0, 300, { maintain: true, start: 1520 });
+            const state = harness.ctx!.state;
+            const clock = installFakeClock();
+            try {
+                harness.startClose(true, false);
+                expect(harness.nativeCommands).toEqual([{ animated: false, x: 0, y: 1240 }]);
+                harness.nativeFrame(1240);
+                emit("onStart", 0);
+                emit("onMove", 150);
+                harness.nativeFrame(1240);
+                emit("onMove", 0);
+                emit("onEnd", 0);
+                for (let i = 0; i < 4; i++) {
+                    clock.tick();
+                    clock.advance(150);
+                }
+                await harness.done();
+                flush();
+                clock.advance(2000);
+                expect(harness.nativeCommands).toEqual([{ animated: false, x: 0, y: 1240 }]);
+                expect(commands).toHaveLength(0);
+                expect(state.scroll).toBe(1240);
+                expect(freeze.value).toBe(false);
+            } finally {
+                state.scheduledWork.dispose();
+                clock.restore();
+                mock.restore();
+                harness.unmount();
+            }
+        });
         it(`${platform}: keeps the closed range for a non-animated send during an animated close`, async () => {
             const freeze = shared(false);
             const harness = await mount(platform, freeze, 0, 0, 300, { maintain: true, start: 300 });
@@ -798,13 +863,12 @@ describe("animated end scroll with frozen keyboard close", () => {
                         flush();
                         clock.advance(2000);
                         // Native animations own the close: no past-end clamp or UI-thread command. A second
-                        // send keeps the existing supersession stop at the observed offset.
+                        // send replaces the first animation without a plain stop.
                         expect(harness.nativeCommands).toEqual(
                             sends === 1
                                 ? [{ animated: true, x: 0, y: 1340 }]
                                 : [
                                       { animated: true, x: 0, y: 1340 },
-                                      { animated: false, x: 0, y: 1470 },
                                       { animated: true, x: 0, y: 1440 },
                                   ],
                         );

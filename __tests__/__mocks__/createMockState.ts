@@ -81,6 +81,7 @@ export function createMockState(
             getAdjust: () => 0,
             requestAdjust: () => {}, // Mock scroll adjust handler
             setMounted: () => {},
+            supersedePendingAdjust: () => {},
         },
         scrollForNextCalculateItemsInView: undefined,
         scrollHistory: [],
