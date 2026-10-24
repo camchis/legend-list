@@ -14,7 +14,7 @@
 
 - Feat: Add ref methods `cancelScroll` to stop queued and active scrolling, `scrollToKey` to navigate by stable item key through prepends, `getScrollAnchor` to capture the first visible item and its offset, and `anchorVisibleContent` to keep a visible item in place through layout changes.
 - Feat: Add `viewportMargin: { start, end }` to `scrollIndexIntoView` to keep space clear at the start and end of the viewport along the scroll axis.
-- Feat: Expose `distanceFromEnd`, `isFollowingEnd`, and `dataKey` through `getState()`, and accept `distanceFromEnd` and `isFollowingEnd` in `getState().listen`.
+- Feat: Expose `distanceFromEnd`, `isFollowingEnd`, and `dataKey` through `getState()`, and accept `isFollowingEnd` in `getState().listen`.
 - Feat: Add boolean `maintainScrollAtEnd.on.dataAppend` to follow only additions that preserve existing item keys in order; `on.dataChange` remains a boolean option for all data changes.
 - Feat: `onUserScroll` fires once per accepted real user gesture (native drag with its momentum, web touch/wheel gesture, scroll key press, scrollbar input, or iOS status-bar tap), never for library or list-ref scrolls, and remains `@experimental` with heuristic wheel grouping and gaps in native pointer/wheel-only and web overlay scrollbar detection.
 - Fix: With a native screen reader enabled, unowned accessibility scrolling toward the start releases end following and reports `onUserScroll` once per burst; assistive input during library animations or just after `cancelScroll()` can be missed, and scrolls bypassing the list (such as native-ref commands or Reanimated `scrollTo` worklets) cannot be distinguished from accessibility input, so call `cancelScroll()` on the JS thread before that navigation.

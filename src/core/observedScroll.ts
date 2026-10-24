@@ -1,4 +1,3 @@
-import { getContentSize } from "@/state/getContentSize";
 import type { StateContext } from "@/state/state";
 import { peekLogicalHorizontalOffset } from "@/utils/rtl";
 
@@ -11,8 +10,4 @@ export function getObservedScrollOffset(ctx: StateContext, fallbackOffset = ctx.
     return state.props.horizontal
         ? peekLogicalHorizontalOffset(state, observed, scroller!.getMaxScrollOffset?.())
         : observed;
-}
-
-export function getDistanceFromEnd(ctx: StateContext) {
-    return Math.max(0, getContentSize(ctx) - getObservedScrollOffset(ctx) - ctx.state.scrollLength);
 }

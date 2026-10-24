@@ -1,4 +1,4 @@
-import { settlePendingImperativeScroll } from "@/core/cancelImperativeScroll";
+import { settlePendingImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
 import { cancelScroll } from "@/core/cancelScroll";
 import { interruptMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
 import { type StateContext, set$ } from "@/state/state";
@@ -59,14 +59,7 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
                 if (state.pendingScrollResolve === resolve) {
                     state.pendingScrollResolve = undefined;
                 }
-                set$(
-                    ctx,
-                    "isScrollActive",
-                    !!state.isDragging ||
-                        !!state.isMomentumScrolling ||
-                        !!state.scrollingTo ||
-                        !!state.pendingScrollResolve,
-                );
+                syncScrollActive(ctx);
                 rearmEndFollowIfSettled(ctx);
                 resolve();
             }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import "../setup";
 
 import { cancelScroll, interruptUserScroll } from "../../src/core/cancelScroll";
+import { setInitialScrollSession } from "../../src/core/initialScrollSession";
 import { Platform } from "../../src/platform/Platform";
 import { createMockContext } from "../__mocks__/createMockContext";
 
@@ -122,6 +123,32 @@ describe("cancelScroll", () => {
             });
             cancelScroll(ctx);
             expect(ctx.state.scrollAdjustHandler.commitPendingAdjust).toHaveBeenCalledTimes(1);
+        },
+    );
+
+    it.each([false, true])(
+        "leaves isScrollActive matching the scroll owners after release (re-entrant: %p)",
+        (reentrant) => {
+            Platform.OS = "web";
+            const onScroll = mock(() => {
+                // A scroll started from the onScroll released by finishing the superseded initial scroll.
+                if (reentrant) {
+                    ctx.state.scrollingTo = { animated: true, offset: 500 } as any;
+                    ctx.state.visibleContentAnchor = { key: "item-1", offset: 0 };
+                }
+            });
+            const { ctx } = createScrollingContext(undefined, { onScroll });
+            ctx.values.set("isScrollActive", true);
+            ctx.state.initialScroll = { index: 0, viewOffset: 0 } as any;
+            setInitialScrollSession(ctx.state, { kind: "bootstrap" });
+            ctx.state.deferredPublicOnScrollEvent = { nativeEvent: { contentOffset: { x: 0, y: 0 } } } as any;
+
+            cancelScroll(ctx);
+
+            expect(onScroll).toHaveBeenCalledTimes(1);
+            expect(ctx.values.get("isScrollActive")).toBe(reentrant);
+            expect(!!ctx.state.visibleContentAnchor).toBe(reentrant);
+            ctx.state.scheduledWork.dispose();
         },
     );
 

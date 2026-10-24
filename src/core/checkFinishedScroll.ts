@@ -3,6 +3,7 @@ import { calculateOffsetForIndex } from "@/core/calculateOffsetForIndex";
 import { calculateOffsetWithOffsetPosition } from "@/core/calculateOffsetWithOffsetPosition";
 import { cancelScroll } from "@/core/cancelScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
+import { getNativeScrollPoint } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { initialScrollCompletion, initialScrollWatchdog } from "@/core/initialScrollSession";
 import { getObservedScrollOffset } from "@/core/observedScroll";
@@ -10,7 +11,6 @@ import { clampScrollIndex } from "@/core/scrollToIndex";
 import { Platform } from "@/platform/Platform";
 import { getContentSize } from "@/state/getContentSize";
 import type { StateContext } from "@/state/state";
-import { toNativeHorizontalOffset } from "@/utils/rtl";
 
 type ActiveScrollTarget = NonNullable<StateContext["state"]["scrollingTo"]>;
 const INITIAL_SCROLL_MAX_FALLBACK_CHECKS = 20;
@@ -156,16 +156,7 @@ function checkFinishedScrollFrame(ctx: StateContext) {
 }
 
 function scrollToFallbackOffset(ctx: StateContext, offset: number, animated = false) {
-    const horizontalOffset = toNativeHorizontalOffset(
-        ctx.state,
-        offset,
-        Math.max(getContentSize(ctx), ctx.state.props.contentContainerMinSize ?? 0),
-    );
-    ctx.state.refScroller.current?.scrollTo({
-        animated,
-        x: ctx.state.props.horizontal ? horizontalOffset : 0,
-        y: ctx.state.props.horizontal ? 0 : offset,
-    });
+    ctx.state.refScroller.current?.scrollTo({ animated, ...getNativeScrollPoint(ctx, offset) });
 }
 
 // In case checkFinishedScroll does not work correctly, set a maximum timeout

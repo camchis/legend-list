@@ -2156,3 +2156,81 @@ it("remembers wheel gestures at the end boundary before an app command", async (
         interrupt.mockRestore();
     }
 });
+
+it("ignores block-axis scroll keys in a horizontal list", async () => {
+    registerWebScrollMocks();
+    resetMocks();
+    maxOffset = 1000;
+    ownerScroll = 500;
+    mockCtx.state.props.horizontal = true;
+    const onUserScroll = mock(() => {});
+    mockCtx.state.props.onUserScroll = onUserScroll;
+    const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+    const { ListComponentScrollView } = await import("../../src/components/ListComponentScrollView?horizontal-keys");
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+        renderer = TestRenderer.create(
+            <ListComponentScrollView horizontal onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll>
+                <div />
+            </ListComponentScrollView>,
+        );
+    });
+    const press = (key: string, shiftKey = false) => scrollListeners.get("keydown")?.({ key, shiftKey } as any);
+    try {
+        for (const name of ["PageUp", "PageDown", "Home", "End", " ", "ArrowUp", "ArrowDown"]) press(name);
+        press(" ", true);
+        scrollListeners.get("keydown")?.({ altKey: true, key: "ArrowLeft" } as any);
+        scrollListeners.get("keydown")?.({ key: "ArrowLeft", metaKey: true } as any);
+        expect(onUserScroll).not.toHaveBeenCalled();
+        press("ArrowRight");
+        press("ArrowLeft");
+        expect(onUserScroll).toHaveBeenCalledTimes(2);
+    } finally {
+        act(() => renderer!.unmount());
+        interrupt.mockRestore();
+    }
+});
+
+it("does not report list-owned scroll events as user scrolls", async () => {
+    registerWebScrollMocks();
+    resetMocks();
+    maxOffset = 1000;
+    const onUserScroll = mock(() => {});
+    mockCtx.state.props.onUserScroll = onUserScroll;
+    const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+    const { ListComponentScrollView } = await import("../../src/components/ListComponentScrollView?owned-scrolls");
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+        renderer = TestRenderer.create(
+            <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll>
+                <div />
+            </ListComponentScrollView>,
+        );
+    });
+    const scrollFrom500 = (to: number, owner: Record<string, unknown>) => {
+        mockCtx.state.scrollingTo = undefined;
+        mockCtx.state.maintainingScrollAtEnd = { animated: false };
+        mockCtx.state.didFinishInitialScroll = true;
+        mockCtx.state.initialScroll = undefined;
+        Object.assign(mockCtx.state, owner);
+        mockCtx.state.scroll = 500;
+        ownerScroll = to;
+        scrollListeners.get("scroll")?.({} as Event);
+    };
+    try {
+        // Owned scrolls move away from the last processed offset in either direction.
+        scrollFrom500(100, { scrollingTo: { animated: true, offset: 100 } });
+        scrollFrom500(100, { didFinishInitialScroll: false, initialScroll: { index: 5 } });
+        scrollFrom500(1000, {});
+        // Without end following, moving back is ordinary scrolling with nothing to release.
+        scrollFrom500(100, { maintainingScrollAtEnd: undefined });
+        expect(interrupt).not.toHaveBeenCalled();
+        expect(onUserScroll).not.toHaveBeenCalled();
+        // Moving back from the end while only end following owns the scroll is user input.
+        scrollFrom500(100, {});
+        expect(interrupt).toHaveBeenCalledTimes(1);
+    } finally {
+        act(() => renderer!.unmount());
+        interrupt.mockRestore();
+    }
+});

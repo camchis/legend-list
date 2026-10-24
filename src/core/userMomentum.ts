@@ -1,4 +1,5 @@
 import { EDGE_POSITION_EPSILON, USER_MOMENTUM_STALL_TIMEOUT_MS, USER_MOMENTUM_WAIT_TIMEOUT_MS } from "@/constants";
+import { syncScrollActive } from "@/core/cancelImperativeScroll";
 import { doMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
 import { getContentSize } from "@/state/getContentSize";
 import { peek$, type StateContext, set$ } from "@/state/state";
@@ -21,7 +22,7 @@ export function settleUserScroll(ctx: StateContext) {
     if (state.isDragging) return;
     state.scheduledWork.cancel("endFollowRearm");
     state.isMomentumScrolling = false;
-    set$(ctx, "isScrollActive", !!state.scrollingTo || !!state.pendingScrollResolve);
+    syncScrollActive(ctx);
     const baseline = state.userScrollContentSize;
     state.userScrollContentSize = undefined;
     if (baseline === undefined) {
@@ -39,7 +40,6 @@ export function settleUserScroll(ctx: StateContext) {
     const contentSize = getContentSize(ctx);
     const distance = Math.max(0, contentSize - state.scroll - state.scrollLength);
     const credit = Math.max(0, contentSize - baseline);
-    set$(ctx, "distanceFromEnd", distance);
     set$(
         ctx,
         "isWithinMaintainScrollAtEndThreshold",

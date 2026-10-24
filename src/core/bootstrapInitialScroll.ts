@@ -148,8 +148,7 @@ function startBootstrapInitialScrollSession(
             passCount: 0,
             previousResolvedOffset: undefined,
             scroll: options.scroll,
-            seedContentOffset:
-                options.seedContentOffset ?? previousBootstrapInitialScroll?.seedContentOffset ?? options.scroll,
+            seedContentOffset: options.seedContentOffset ?? options.scroll,
             targetIndexSeed: options.targetIndexSeed,
             visibleIndices: undefined,
         },
@@ -484,6 +483,19 @@ export function handleBootstrapInitialScrollDataChange(
     if (!didDataChange && !shouldResetDidFinish && !shouldRetargetBottomAligned) {
         return;
     }
+    const retarget = (target: InternalInitialScrollTarget) => {
+        setInitialScrollTarget(ctx, target, {
+            resetDidFinish: shouldResetDidFinish,
+        });
+        rearmBootstrapInitialScroll(ctx, {
+            scroll: resolveInitialScrollOffset(ctx, target),
+            seedContentOffset:
+                shouldResetDidFinish && !bootstrapInitialScroll
+                    ? getObservedBootstrapInitialScrollOffset(state)
+                    : undefined,
+            targetIndexSeed: target.index,
+        });
+    };
 
     if (shouldRetargetBottomAligned) {
         const updatedInitialScroll = initialScrollAtEnd
@@ -525,17 +537,7 @@ export function handleBootstrapInitialScrollDataChange(
             shouldResetDidFinish ||
             didDataChange
         ) {
-            setInitialScrollTarget(ctx, updatedInitialScroll, {
-                resetDidFinish: shouldResetDidFinish,
-            });
-            rearmBootstrapInitialScroll(ctx, {
-                scroll: resolveInitialScrollOffset(ctx, updatedInitialScroll),
-                seedContentOffset:
-                    shouldResetDidFinish && !bootstrapInitialScroll
-                        ? getObservedBootstrapInitialScrollOffset(state)
-                        : undefined,
-                targetIndexSeed: updatedInitialScroll.index,
-            });
+            retarget(updatedInitialScroll);
             return;
         }
     }
@@ -549,17 +551,7 @@ export function handleBootstrapInitialScrollDataChange(
      * already cleared didFinishInitialScroll before the data handoff.
      */
     if (bootstrapInitialScroll || (previousDataLength === 0 && dataLength > 0)) {
-        setInitialScrollTarget(ctx, initialScroll, {
-            resetDidFinish: shouldResetDidFinish,
-        });
-        rearmBootstrapInitialScroll(ctx, {
-            scroll: resolveInitialScrollOffset(ctx, initialScroll),
-            seedContentOffset:
-                shouldResetDidFinish && !bootstrapInitialScroll
-                    ? getObservedBootstrapInitialScrollOffset(state)
-                    : undefined,
-            targetIndexSeed: initialScroll.index,
-        });
+        retarget(initialScroll);
     }
 }
 

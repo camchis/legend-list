@@ -558,21 +558,19 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
                 )
             )
                 return;
-            if (horizontal && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-                acceptInput(event, inputDirection(event.key === "ArrowLeft" ? -1 : 1));
+            // Page, Home/End and Space keys scroll the block axis, which a horizontal list does not own.
+            // Alt/Cmd+Left/Right navigate history instead of scrolling.
+            if (horizontal) {
+                if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.altKey && !event.metaKey)
+                    acceptInput(event, inputDirection(event.key === "ArrowLeft" ? -1 : 1));
             } else if (
-                (!horizontal && event.key === "ArrowUp") ||
+                event.key === "ArrowUp" ||
                 event.key === "PageUp" ||
                 event.key === "Home" ||
                 (event.key === " " && event.shiftKey)
             )
                 acceptInput(event, -1);
-            else if (
-                (!horizontal && event.key === "ArrowDown") ||
-                event.key === "PageDown" ||
-                event.key === "End" ||
-                event.key === " "
-            )
+            else if (event.key === "ArrowDown" || event.key === "PageDown" || event.key === "End" || event.key === " ")
                 acceptInput(event, 1);
         };
         let scrollbarPressOffset: number | undefined;

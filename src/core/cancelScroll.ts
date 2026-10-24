@@ -1,12 +1,11 @@
-import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
+import { cancelImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
 import { interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { getNativeScrollPoint } from "@/core/doScrollParams";
 import { clearPreservedInitialScrollTarget, supersedeInitialScroll } from "@/core/finishInitialScroll";
 import { getObservedScrollOffset } from "@/core/observedScroll";
 import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";
-import { getContentSize } from "@/state/getContentSize";
-import { peek$, type StateContext, set$ } from "@/state/state";
-import { toNativeHorizontalOffset } from "@/utils/rtl";
+import { peek$, type StateContext } from "@/state/state";
 
 export function cancelScroll(ctx: StateContext, stopAnimation = true) {
     const { state } = ctx;
@@ -14,14 +13,7 @@ export function cancelScroll(ctx: StateContext, stopAnimation = true) {
     const scroller = state.refScroller.current;
     // Without a native observation, scrollPending has not yet absorbed deferred adjustments.
     const observed = getObservedScrollOffset(ctx, peek$(ctx, "scrollAdjustPending") ? state.scrollPending : undefined);
-    ctx.scrollRequestTracker?.cancel();
-    interruptMaintainScrollAtEnd(ctx);
-    cancelImperativeScroll(state);
-    supersedeInitialScroll(ctx);
-    clearPreservedInitialScrollTarget(state);
-    state.pendingEndMeasurements = undefined;
-    state.visibleContentAnchor = undefined;
-    set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
+    releaseScrollOwners(ctx, true);
     state.scrollPending = observed;
     // Deferred adjustments are not applied natively yet, so the observed offset is current even
     // inside their MVCP ignore window; dropping it would count them twice in the commit below.
@@ -32,12 +24,7 @@ export function cancelScroll(ctx: StateContext, stopAnimation = true) {
     if (wasAnimating && stopAnimation) {
         // Stop at the scroller's own raw offset when it reports one, avoiding an RTL round trip.
         const x = state.props.horizontal
-            ? (scroller?.getCurrentScrollOffset?.() ??
-              toNativeHorizontalOffset(
-                  state,
-                  observed,
-                  Math.max(getContentSize(ctx), state.props.contentContainerMinSize ?? 0),
-              ))
+            ? (scroller?.getCurrentScrollOffset?.() ?? getNativeScrollPoint(ctx, observed).x)
             : 0;
         scroller?.scrollTo({ animated: false, x, y: state.props.horizontal ? 0 : observed });
     }
@@ -46,16 +33,24 @@ export function cancelScroll(ctx: StateContext, stopAnimation = true) {
     state.scrollAdjustHandler.commitPendingAdjust();
 }
 
+function releaseScrollOwners(ctx: StateContext, supersedeInitial: boolean) {
+    const { state } = ctx;
+    ctx.scrollRequestTracker?.cancel();
+    interruptMaintainScrollAtEnd(ctx);
+    cancelImperativeScroll(state);
+    // Before supersedeInitialScroll, whose released onScroll may set a new anchor re-entrantly.
+    state.pendingEndMeasurements = undefined;
+    state.visibleContentAnchor = undefined;
+    if (supersedeInitial) supersedeInitialScroll(ctx);
+    clearPreservedInitialScrollTarget(state);
+    // After supersedeInitialScroll, so a scroll started re-entrantly from its onScroll stays active.
+    syncScrollActive(ctx);
+}
+
 export function interruptUserScroll(ctx: StateContext) {
     if (ctx.state.scrollingTo || (ctx.state.initialScroll && !ctx.state.didFinishInitialScroll)) {
         cancelScroll(ctx, Platform.OS === "web");
     } else {
-        ctx.scrollRequestTracker?.cancel();
-        interruptMaintainScrollAtEnd(ctx);
-        cancelImperativeScroll(ctx.state);
-        clearPreservedInitialScrollTarget(ctx.state);
-        ctx.state.pendingEndMeasurements = undefined;
-        ctx.state.visibleContentAnchor = undefined;
-        set$(ctx, "isScrollActive", !!ctx.state.isDragging || !!ctx.state.isMomentumScrolling);
+        releaseScrollOwners(ctx, false);
     }
 }

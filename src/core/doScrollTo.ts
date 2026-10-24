@@ -2,15 +2,14 @@ import { EDGE_POSITION_EPSILON } from "@/constants";
 import { calculateOffsetForIndex } from "@/core/calculateOffsetForIndex";
 import { cancelScroll } from "@/core/cancelScroll";
 import { checkFinishedScrollFallback, getCurrentTargetOffset } from "@/core/checkFinishedScroll";
-import type { DoScrollToParams } from "@/core/doScrollParams";
+import { type DoScrollToParams, getNativeScrollPoint } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { scrollTo } from "@/core/scrollTo";
 import { clampScrollIndex } from "@/core/scrollToIndex";
-import { getContentSize } from "@/state/getContentSize";
 import type { StateContext } from "@/state/state";
 import type { LegendListScrollerRef } from "@/types.internal";
 import { getItemSizeAtIndex } from "@/utils/getItemSize";
-import { peekLogicalHorizontalOffset, toNativeHorizontalOffset } from "@/utils/rtl";
+import { peekLogicalHorizontalOffset } from "@/utils/rtl";
 
 const SCROLL_END_IDLE_MS = 80;
 const SCROLL_END_MAX_MS = 1500;
@@ -34,12 +33,7 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
 
     const isAnimated = !!animated;
     const isHorizontal = !!horizontal;
-    const contentSize = isHorizontal
-        ? Math.max(getContentSize(ctx), state.props.contentContainerMinSize ?? 0)
-        : undefined;
-    const left = isHorizontal ? toNativeHorizontalOffset(state, offset, contentSize) : 0;
-    const top = isHorizontal ? 0 : offset;
-    scroller.scrollTo({ animated: isAnimated, x: left, y: top });
+    scroller.scrollTo({ animated: isAnimated, ...getNativeScrollPoint(ctx, offset, isHorizontal) });
 
     const readOffset = () => {
         const observed = scroller.getCurrentScrollOffset?.() ?? Number.NaN;

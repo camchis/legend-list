@@ -1,5 +1,5 @@
 import { USER_MOMENTUM_STALL_TIMEOUT_MS } from "@/constants";
-import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
+import { cancelImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
 import { isEndOfContentTarget } from "@/core/endOfContentTarget";
 import { getScrollRequestTracker } from "@/core/scrollRequestTracker";
@@ -16,19 +16,13 @@ export function interruptMaintainScrollAtEnd(ctx: StateContext) {
     const maintaining = state.maintainingScrollAtEnd;
     state.endFollowInterrupted = true;
     set$(ctx, "isFollowingEnd", false);
-    const cancelActiveScroll = !!(
-        maintaining === "animated" ||
-        maintaining === "instant" ||
-        (maintaining && state.scrollingTo?.isScrollToEnd)
-    );
-    if (cancelActiveScroll) {
+    if (maintaining === "animated" || maintaining === "instant" || (maintaining && state.scrollingTo?.isScrollToEnd)) {
         cancelImperativeScroll(state);
-        set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
+        syncScrollActive(ctx);
     }
     if (maintaining || state.pendingMaintainScrollAtEnd) {
         finishMaintainScrollAtEnd(ctx);
     }
-    return cancelActiveScroll;
 }
 
 // App native commands have no list request or drag owner. Hold rearming through their scroll events.

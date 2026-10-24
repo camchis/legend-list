@@ -3,7 +3,7 @@ import {
     schedulePreservedEndAnchorCorrection,
     startBootstrapInitialScrollOnMount,
 } from "@/core/bootstrapInitialScroll";
-import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
+import { cancelImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
 import { checkFinishedScroll } from "@/core/checkFinishedScroll";
 import { clearPreservedInitialScrollTarget, finishInitialScroll } from "@/core/finishInitialScroll";
 import { advanceCurrentInitialScrollSession, setInitialScrollTarget } from "@/core/initialScroll";
@@ -136,7 +136,7 @@ export function handleInitialScrollDataChange(
     if (didStartFreshData) {
         // The previous dataset's scroll must not block or finish the new bootstrap.
         cancelImperativeScroll(state);
-        set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
+        syncScrollActive(ctx);
         state.endFollowInterrupted = false;
         state.userScrollContentSize = undefined;
         state.visibleContentAnchor = undefined;

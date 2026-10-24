@@ -21,7 +21,7 @@ import {
     handleBootstrapInitialScrollLayoutChange,
 } from "@/core/bootstrapInitialScroll";
 import { calculateItemsInView } from "@/core/calculateItemsInView";
-import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
+import { cancelImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
 import { interruptUserScroll } from "@/core/cancelScroll";
 import { checkFinishedScrollFallback } from "@/core/checkFinishedScroll";
 import { checkResetContainers } from "@/core/checkResetContainers";
@@ -646,7 +646,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
             state.maintainingScrollAtEnd = undefined;
             state.pendingMaintainScrollAtEnd = false;
             cancelImperativeScroll(state);
-            set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
+            syncScrollActive(ctx);
             cancelBootstrapInitialScrollFrame(state);
             state.scheduledWork.dispose();
         };
@@ -969,11 +969,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
             onScrollEndDrag: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
                 onScroll(ctx, event, false);
                 state.isDragging = false;
-                set$(
-                    ctx,
-                    "isScrollActive",
-                    !!state.isMomentumScrolling || !!state.scrollingTo || !!state.pendingScrollResolve,
-                );
+                syncScrollActive(ctx);
                 // Suspend from release through momentum, including delayed or missing pairs.
                 state.userScrollContentSize = getContentSize(ctx);
                 armUserScrollSettle(ctx);

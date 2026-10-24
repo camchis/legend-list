@@ -49,7 +49,6 @@ export type ListenerType =
     | "stylePaddingTop"
     | "totalSize"
     | "isFollowingEnd"
-    | "distanceFromEnd"
     | "isAtEnd"
     | "isAtStart"
     | "isNearEnd"
@@ -72,7 +71,6 @@ export type LegendListListenerType = Extract<
     | "footerSize"
     | "headerSize"
     | "isFollowingEnd"
-    | "distanceFromEnd"
     | "isAtEnd"
     | "isAtStart"
     | "isNearEnd"
@@ -101,7 +99,6 @@ export type ListenerTypeValueMap = {
     footerSize: number;
     headerSize: number;
     isFollowingEnd: boolean;
-    distanceFromEnd: number;
     isAtEnd: boolean;
     isAtStart: boolean;
     isNearEnd: boolean;

@@ -73,10 +73,6 @@ export function isRTLProps(props: RTLPropsLike | undefined): boolean {
     return props?.rtl ?? !!I18nManager.isRTL;
 }
 
-export function isRTLList(state: Pick<InternalState, "props"> | undefined): boolean {
-    return isRTLProps(state?.props);
-}
-
 export function isHorizontalRTL(state: Pick<InternalState, "props"> | undefined): boolean {
     return isHorizontalRTLProps(state?.props);
 }
@@ -90,13 +86,6 @@ export function getStylePaddingEnd(props: StylePaddingPropsLike | undefined): nu
         return props?.stylePaddingBottom || 0;
     }
     return (isHorizontalRTLProps(props) ? props.stylePaddingLeft : props.stylePaddingRight) || 0;
-}
-
-export function getLogicalHorizontalMaxOffset(
-    state: Pick<InternalState, "props" | "scrollLength">,
-    contentWidth: number | undefined,
-): number {
-    return getHorizontalMaxOffset(state, contentWidth) ?? 0;
 }
 
 export function getHorizontalInsetEnd(
@@ -215,9 +204,9 @@ export function toLogicalHorizontalOffset(
     }
 
     if (!state.hasScrolled) {
-        const defaultMode = getDefaultHorizontalRTLScrollType();
-        state.horizontalRTLScrollType = defaultMode;
-        return clampHorizontalOffset(defaultMode === "inverted" ? invertedOffset : normalOffset, maxOffset);
+        // Web owners and the negative convention return above, leaving the native default.
+        state.horizontalRTLScrollType = "inverted";
+        return clampHorizontalOffset(invertedOffset, maxOffset);
     }
 
     const referenceScroll = state.scroll;

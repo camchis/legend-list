@@ -6,7 +6,7 @@ import { armAppScrollRearm, doMaintainScrollAtEnd, interruptMaintainScrollAtEnd 
 import { supersedeInitialScroll } from "@/core/finishInitialScroll";
 import { getStartOffsetAdjustment } from "@/core/getStartOffsetAdjustment";
 import { retargetActiveInitialScrollAtEnd } from "@/core/initialScrollLifecycle";
-import { getDistanceFromEnd, getObservedScrollOffset } from "@/core/observedScroll";
+import { getObservedScrollOffset } from "@/core/observedScroll";
 import { scheduleContainerLayout } from "@/core/scheduleContainerLayout";
 import { getScrollRequestTracker, type ScrollRequestRun } from "@/core/scrollRequestTracker";
 import { findVisibleItemIndex, scrollTo } from "@/core/scrollTo";
@@ -285,7 +285,7 @@ export function createImperativeHandle(
             data: state.props.data,
             dataEpoch: state.freshDataTransitionEpoch,
             dataKey: state.props.dataKey,
-            distanceFromEnd: getDistanceFromEnd(ctx),
+            distanceFromEnd: Math.max(0, getContentSize(ctx) - getObservedScrollOffset(ctx) - state.scrollLength),
             elementAtIndex: (index: number) => ctx.viewRefs.get(findContainerId(ctx, getId(state, index)))?.current,
             end: state.endNoBuffer,
             endBuffered: state.endBuffered,

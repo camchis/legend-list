@@ -626,7 +626,7 @@ export type LegendListState = {
     indexByKey: (key: string) => number | undefined;
     listen: {
         // Keep legacy implementations assignable while inferring values for every listener key.
-        <T extends Exclude<LegendListListenerType, "isFollowingEnd" | "distanceFromEnd">>(
+        <T extends Exclude<LegendListListenerType, "isFollowingEnd">>(
             listenerType: T,
             callback: (value: Pick<ListenerTypeValueMap, LegendListListenerType>[T]) => void,
         ): () => void;

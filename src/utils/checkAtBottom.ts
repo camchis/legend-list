@@ -25,7 +25,6 @@ export function checkAtBottom(ctx: StateContext, allowedEdge?: ReachedEdge, allo
 
     const contentSize = getContentSize(ctx);
     const distanceFromEnd = contentSize - scroll - scrollLength;
-    set$(ctx, "distanceFromEnd", Math.max(0, distanceFromEnd));
     resetSharedEdgeGateIfOutsideHysteresis(ctx);
     if (state.props.data.length === 0 && scrollLength > 0 && contentSize <= scrollLength) {
         set$(ctx, "isAtEnd", true);

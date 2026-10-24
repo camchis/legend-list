@@ -49,11 +49,12 @@ const state: Omit<LegendListState, Pending> = legacyState;
 // @ts-expect-error legacy state lacks the pending required members
 const fullState: LegendListState = legacyState;
 state.listen("isFollowingEnd", value => { const following: boolean = value; });
-state.listen("distanceFromEnd", value => { const distance: number = value; });
 state.listen("isAtEnd", value => { const atEnd: boolean = value; });
 state.listen("lastItemKeys", value => { const keys: string[] = value; });
-declare const key: "distanceFromEnd" | "isAtEnd";
+declare const key: "totalSize" | "isAtEnd";
 state.listen(key, value => { const metric: number | boolean = value; });
+// @ts-expect-error distanceFromEnd is only available through getState()
+state.listen("distanceFromEnd", () => {});
 // @ts-expect-error callback must receive boolean
 state.listen("isFollowingEnd", (value: number) => {});
 // @ts-expect-error unknown listener keys are rejected

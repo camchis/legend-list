@@ -431,7 +431,8 @@ describe("imperative scroll results", () => {
         h.state.maintainingScrollAtEnd = "animated";
         h.browser.step(400);
 
-        expect(interruptMaintainScrollAtEnd(h.ctx)).toBe(true);
+        interruptMaintainScrollAtEnd(h.ctx);
+        expect(h.state.scrollingTo).toBeUndefined();
         await flushMicrotasks();
         expect(scroll.value).toBeUndefined();
     });
