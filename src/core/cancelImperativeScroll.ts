@@ -13,7 +13,8 @@ export function cancelScrollCompletionChecks({ scheduledWork }: InternalState) {
 type StoppedReason = Exclude<LegendListScrollResult, void>["reason"];
 
 export function settlePendingImperativeScroll(state: InternalState, reason: StoppedReason = "superseded") {
-    const resolvePendingScroll = state.pendingScrollResolve ?? state.pendingScrollToEnd?.resolve;
+    state.scheduledWork.cancel("scrollElementTarget");
+    const resolvePendingScroll = state.pendingScrollResolve;
     state.pendingScrollResolve = undefined;
     state.pendingScrollToEnd = undefined;
     resolvePendingScroll?.({ reason });

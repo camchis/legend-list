@@ -83,16 +83,18 @@ export type LegendListRef = Omit<
     "getAnimatableRef" | "getNativeScrollRef" | "getScrollResponder" | "reportContentInset"
 > & {
     /**
+     * Returns a stable wrapper with different identity from the native instance.
      * JS scrollTo, scrollToEnd, and scrollToOffset release end following. Reanimated UI-thread scrollTo bypasses JS;
      * call cancelScroll() on the JS thread before starting that navigation.
      */
     getAnimatableRef(): React.ElementRef<typeof ScrollViewComponent>;
     /**
+     * Returns a stable wrapper with different identity from the native instance.
      * JS scrollTo, scrollToEnd, and scrollToOffset commands release end following
      * and supersede queued or active list scrolling.
      */
     getNativeScrollRef(): React.ElementRef<typeof ScrollViewComponent>;
-    /** JS scroll and zoom commands release end following and supersede list scrolling. */
+    /** Returns a stable wrapper; JS scroll and zoom commands release end following and supersede list scrolling. */
     getScrollResponder(): ScrollResponderMixin;
     reportContentInset(inset?: Partial<Insets> | null): void;
 };

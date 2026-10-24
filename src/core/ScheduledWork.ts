@@ -10,12 +10,13 @@ export type ScheduledWorkKey =
     | "fullDrawDistancePrewarm"
     | "ignoreScrollFromMVCP"
     | "imperativeScrollReady"
+    | "maintainScrollAtEnd"
     | "mvcpRecalculate"
     | "platformScrollCompletion"
     | "scrollElementTarget"
+    | "scrollTargetRetarget"
     | "preservedInitialScroll"
-    | "renderRangeProjection"
-    | "userMomentumStallCheck";
+    | "renderRangeProjection";
 
 interface Work {
     callback?: () => void;

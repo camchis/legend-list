@@ -660,6 +660,138 @@ describe("AnimatedLegendList itemLayoutAnimation integration", () => {
 });
 
 describe("AnimatedLegendList content size transitions", () => {
+    for (const [signalName, horizontal, strict, revealedSize, delay] of [
+        ["totalSize", false, false, 1200, 0],
+        ["alignItemsAtEndPadding", true, false, 1200, 0],
+        ["totalSize", false, true, 1200, 0],
+        ["totalSize", false, false, 1400, 0],
+        ["totalSize", false, false, 1200, 50],
+    ] as const) {
+        it(`resumes a cancelled ${signalName} transition on Suspense reveal (StrictMode: ${strict}, target: ${revealedSize}, delay: ${delay})`, async () => {
+            registerLegendListModuleMock();
+            let visualSize!: { value: number };
+            const readVisualSize = mock((value: number) => value);
+            registerReanimatedModuleMock({
+                ...createReanimatedOverrides(),
+                useSharedValue: (initial: number) => {
+                    visualSize = React.useRef({
+                        current: initial,
+                        get value() {
+                            return readVisualSize(this.current);
+                        },
+                        set value(next: number) {
+                            this.current = next;
+                        },
+                    }).current;
+                    return visualSize;
+                },
+            });
+            const { AnimatedLegendList } = await import("../../src/integrations/reanimated?size-transition-reconnect");
+            const completions: Array<() => void> = [];
+            const animation = mock((target: number, _config: unknown, complete: (finished: boolean) => void) => {
+                completions.push(() => {
+                    visualSize.value = target;
+                    complete(true);
+                });
+                // Cancellation preserves the current frame, as Reanimated does on the device.
+                return (visualSize.value + target) / 2;
+            });
+            // During a builder delay the animation is installed but has not moved yet.
+            const delayFunction = mock((wait: number, value: number) => (wait ? visualSize.value : value));
+            const transition = {
+                getAnimationAndConfig: () => [animation, {}],
+                getDelay: () => delay,
+                getDelayFunction: () => delayFunction,
+            } as any;
+            let listRenderer!: TestRenderer.ReactTestRenderer;
+            act(() => {
+                listRenderer = TestRenderer.create(
+                    <AnimatedLegendList data={["a"]} itemLayoutAnimation={transition} renderItem={() => null} />,
+                );
+            });
+            const SizeComponent = legendListPropsRenders.at(-1).sizeComponentInternal;
+            let context!: ReturnType<typeof useStateContext>;
+            const pending = new Promise<void>(() => {});
+            function Suspend({ hidden }: { hidden: boolean }) {
+                if (hidden) throw pending;
+                return null;
+            }
+            function Harness({ size }: { size: number }) {
+                const ctx = useStateContext();
+                context = ctx;
+                ctx.state ??= createMockState({ didContainersLayout: true, didFinishInitialScroll: true });
+                React.useLayoutEffect(() => {
+                    set$(ctx, signalName, size);
+                    set$(ctx, "readyToRender", true);
+                }, [ctx, size]);
+                return <SizeComponent horizontal={horizontal} signalName={signalName} style={{}} />;
+            }
+            const Wrapper = strict ? React.StrictMode : React.Fragment;
+            const tree = (size: number, hidden = false) => (
+                <Wrapper>
+                    <React.Suspense fallback={null}>
+                        <StateProvider>
+                            <Harness size={size} />
+                        </StateProvider>
+                        <Suspend hidden={hidden} />
+                    </React.Suspense>
+                </Wrapper>
+            );
+            let renderer!: TestRenderer.ReactTestRenderer;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(tree(1000));
+                });
+                act(() => completions.at(-1)?.());
+                const originalContext = context;
+                const originalVisualSize = visualSize;
+                expect(visualSize.value).toBe(1000);
+                const initialCalls = animation.mock.calls.length;
+                act(() => renderer.update(tree(1200)));
+                expect(animation).toHaveBeenCalledTimes(initialCalls + 1);
+                expect(visualSize.value).toBe(delay ? 1000 : 1100);
+                expect(context.state.activeSizeAnimations?.has(signalName)).toBe(true);
+                act(() => renderer.update(tree(1200, true)));
+                expect(visualSize.value).toBe(delay ? 1000 : 1100);
+                expect(context.state.activeSizeAnimations?.size).toBe(0);
+                act(() => set$(context, signalName, revealedSize));
+                expect(context.state.activeSizeAnimations?.size).toBe(0);
+                act(() => renderer.update(tree(revealedSize)));
+                expect(context).toBe(originalContext);
+                expect(visualSize).toBe(originalVisualSize);
+                expect(peek$(context, signalName)).toBe(revealedSize);
+                // StrictMode invokes the reconnect effect twice.
+                const resumedCalls = initialCalls + (strict ? 3 : 2);
+                expect(animation).toHaveBeenCalledTimes(resumedCalls);
+                expect(animation.mock.calls.at(-1)?.[0]).toBe(revealedSize);
+                expect(delayFunction.mock.calls.at(-1)?.[0]).toBe(delay);
+                expect(context.state.activeSizeAnimations?.has(signalName)).toBe(true);
+                act(() => completions.at(-1)?.());
+                expect(visualSize.value).toBe(revealedSize);
+                expect(context.state.activeSizeAnimations?.size).toBe(0);
+                // Reconnecting at rest and changing unrelated signals must not add animations.
+                act(() => renderer.update(tree(revealedSize, true)));
+                act(() => renderer.update(tree(revealedSize)));
+                act(() => set$(context, "isScrollActive", true));
+                act(() => set$(context, "isScrollActive", false));
+                expect(animation).toHaveBeenCalledTimes(resumedCalls);
+                expect(visualSize.value).toBe(revealedSize);
+                act(() => renderer.update(tree(1600)));
+                expect(animation).toHaveBeenCalledTimes(resumedCalls + 1);
+                act(() => completions.at(-1)?.());
+                expect(visualSize.value).toBe(1600);
+                const readsBeforeUnmount = readVisualSize.mock.calls.length;
+                act(() => renderer.unmount());
+                expect(readVisualSize).toHaveBeenCalledTimes(readsBeforeUnmount);
+            } finally {
+                act(() => {
+                    renderer?.unmount();
+                    listRenderer.unmount();
+                });
+            }
+        });
+    }
+
     it("retargets animated bounds and resumes pending end intent only after every size signal settles", async () => {
         registerLegendListModuleMock();
         registerReanimatedModuleMock(createReanimatedOverrides());

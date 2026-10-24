@@ -50,7 +50,7 @@ function cloneScrollEvent(event: NativeSyntheticEvent<NativeScrollEvent>): Nativ
     };
 }
 
-export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeScrollEvent>) {
+export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeScrollEvent>, notify = true) {
     const state = ctx.state;
     const { scrollProcessingEnabled } = state;
 
@@ -90,60 +90,70 @@ export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeSc
         return;
     }
 
-    if (Platform.OS !== "web" && isScreenReaderEnabled()) {
+    let nativeGeometryChanged = insetChanged;
+    const nativeScreenReaderEnabled = Platform.OS !== "web" && isScreenReaderEnabled();
+    if (Platform.OS !== "web") {
         const axis = state.props.horizontal ? "width" : "height";
         const content = event.nativeEvent.contentSize?.[axis];
         const length = event.nativeEvent.layoutMeasurement?.[axis];
         if (content !== undefined && length !== undefined) {
-            const adjust = state.scrollAdjustHandler.getAdjust();
-            const previous = state.accessibilityScrollEvent;
-            // Native accessibility scrolls have no drag boundary. Infer only unowned motion
-            // with stable geometry, skipping the first event after an ownership handoff.
-            const time = Date.now();
-            const blocked = !!(
-                state.scrollingTo ||
-                state.pendingScrollResolve ||
-                state.pendingScrollToEnd ||
-                state.maintainingScrollAtEnd ||
-                state.pendingMaintainScrollAtEnd ||
-                state.pendingEndMeasurements?.size ||
-                hasActiveInitialScroll(state) ||
-                state.scheduledWork.has("appScrollRearm") ||
-                state.isDragging ||
-                state.isMomentumScrolling ||
-                (state.releasedFromUserDrag && state.scheduledWork.has("endFollowRearm")) ||
-                state.pendingNativeMVCPAdjust ||
-                peek$(ctx, "scrollAdjustPending") ||
-                state.ignoreScrollFromMVCP ||
-                insetChanged
-            );
-            const direction = previous ? Math.sign(newScroll - previous.scroll) : 0;
-            const accepted =
-                previous &&
-                !blocked &&
-                !previous.blocked &&
-                content === previous.content &&
-                length === previous.length &&
-                adjust === previous.adjust &&
-                Math.abs(newScroll - previous.scroll) > 1;
-            if (accepted) {
-                if (direction < 0) interruptUserScroll(ctx);
-                // A 250ms idle gap or reversal starts a burst; no cleanup timer is needed.
-                if (previous.time === undefined || time - previous.time > 250 || direction !== previous.direction) {
-                    state.props.onUserScroll?.();
-                }
+            const previousGeometry = state.nativeScrollGeometry;
+            if (!previousGeometry || content !== previousGeometry.content || length !== previousGeometry.length) {
+                nativeGeometryChanged ||= !!previousGeometry;
+                state.nativeScrollGeometry = { content, length };
             }
-            state.accessibilityScrollEvent = {
-                adjust,
-                blocked,
-                content,
-                direction: accepted ? direction : (previous?.direction ?? 0),
-                length,
-                scroll: newScroll,
-                time: accepted ? time : previous?.time,
-            };
+            if (nativeScreenReaderEnabled) {
+                const adjust = state.scrollAdjustHandler.getAdjust();
+                const previous = state.accessibilityScrollEvent;
+                // Native accessibility scrolls have no drag boundary. Infer only unowned motion
+                // with stable geometry, skipping the first event after an ownership handoff.
+                const time = Date.now();
+                const blocked = !!(
+                    state.scrollingTo ||
+                    state.pendingScrollResolve ||
+                    state.pendingScrollToEnd ||
+                    state.maintainingScrollAtEnd ||
+                    state.pendingMaintainScrollAtEnd ||
+                    state.pendingEndMeasurements?.size ||
+                    hasActiveInitialScroll(state) ||
+                    state.scheduledWork.has("appScrollRearm") ||
+                    state.isDragging ||
+                    state.isMomentumScrolling ||
+                    state.userScrollContentSize !== undefined ||
+                    state.pendingNativeMVCPAdjust ||
+                    peek$(ctx, "scrollAdjustPending") ||
+                    state.ignoreScrollFromMVCP ||
+                    insetChanged
+                );
+                const direction = previous ? Math.sign(newScroll - previous.scroll) : 0;
+                const accepted =
+                    previous &&
+                    !blocked &&
+                    !previous.blocked &&
+                    content === previous.content &&
+                    length === previous.length &&
+                    adjust === previous.adjust &&
+                    Math.abs(newScroll - previous.scroll) > 1;
+                if (accepted) {
+                    if (direction < 0) interruptUserScroll(ctx);
+                    // A 250ms idle gap or reversal starts a burst; no cleanup timer is needed.
+                    if (previous.time === undefined || time - previous.time > 250 || direction !== previous.direction) {
+                        state.props.onUserScroll?.();
+                    }
+                }
+                state.accessibilityScrollEvent = {
+                    adjust,
+                    blocked,
+                    content,
+                    direction: accepted ? direction : (previous?.direction ?? 0),
+                    length,
+                    scroll: newScroll,
+                    time: accepted ? time : previous?.time,
+                };
+            }
         }
-    } else if (state.accessibilityScrollEvent) {
+    }
+    if (!nativeScreenReaderEnabled && state.accessibilityScrollEvent) {
         state.accessibilityScrollEvent = undefined;
     }
 
@@ -169,7 +179,7 @@ export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeSc
 
     state.scrollPending = newScroll;
 
-    updateScroll(ctx, newScroll, insetChanged, { fromNativeScrollEvent: true });
+    updateScroll(ctx, newScroll, insetChanged, { fromNativeScrollEvent: true, nativeGeometryChanged });
     trackInitialScrollNativeProgress(state, newScroll);
     clearFinishedBootstrapInitialScrollTargetIfMovedAway(ctx);
 
@@ -177,7 +187,7 @@ export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeSc
         checkFinishedScroll(ctx);
     }
 
-    if (state.props.onScroll) {
+    if (notify && state.props.onScroll) {
         if (shouldDeferPublicOnScroll(state)) {
             state.deferredPublicOnScrollEvent = cloneScrollEvent(event);
         } else {

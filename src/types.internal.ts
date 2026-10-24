@@ -234,11 +234,13 @@ export interface InternalState {
     isEndReached: boolean | null;
     isFirst?: boolean;
     isStartReached: boolean | null;
+    isUnmounted?: boolean;
     lastBatchingAction: number;
     lastLayout: LayoutRectangle | undefined;
     lastFirstVisibleItemCallback?: { index: number; key: string };
     lastNativeScroll?: number;
     lastNativeScrollTime?: number;
+    nativeScrollGeometry?: { content: number; length: number };
     accessibilityScrollEvent?: {
         scroll: number;
         content: number;
@@ -253,24 +255,15 @@ export interface InternalState {
     loadStartTime: number;
     pendingEndMeasurements?: Set<string>;
     isMomentumScrolling?: boolean;
-    // Release provenance survives the handoff timeout and repeated native begins.
-    releasedFromUserDrag?: boolean;
-    didDeferMaintainScrollAtEndForMomentum?: boolean;
-    // Growth not already compensated by MVCP can retain the reader's end intent.
-    momentumSuspendContentSize?: number;
-    momentumSuspendCompensated?: boolean;
-    momentumStallFirstLateFireAt?: number;
+    // Content size at release while a user gesture awaits settlement.
+    userScrollContentSize?: number;
     activeSizeAnimations?: Set<string>;
     resumeMaintainScrollAtEnd?: () => void;
     layoutAdjustmentEpoch?: number;
     lastMetrics?: LegendListMetrics;
     endFollowInterrupted?: boolean;
-    visibleContentAnchor?: { key: string; offset: number };
-    scrollElementTarget?: {
-        element: Element | Range;
-        viewportMargin?: { top?: number; bottom?: number };
-        viewPosition?: number;
-    };
+    visibleContentAnchor?: { key: string; offset: number; sizeOnly?: true };
+    scrollElementTarget?: Parameters<LegendListInternalRef["scrollElementIntoView"]>[0];
     maintainingScrollAtEnd?: MaintainingScrollAtEndState;
     positionRecalculationStartIndex: number | undefined;
     mvcpAnchorLock?: {
@@ -294,7 +287,6 @@ export interface InternalState {
     pendingDataComparison?: PendingDataComparison;
     pendingScrollToEnd?: {
         options?: ScrollToEndOptions;
-        resolve: ScrollResolve;
         token: number;
     };
     pendingTotalSize?: number;

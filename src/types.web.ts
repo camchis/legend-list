@@ -101,7 +101,7 @@ export type LegendListRef = Omit<
     LegendListRefBase,
     "getAnimatableRef" | "getNativeScrollRef" | "getScrollableNode" | "getScrollResponder"
 > & {
-    /** Reveals an element or range; resolves unreachable if it is detached or has no scroll surface. */
+    /** Web only: reveals an element or range; resolves unreachable if detached or without a scroll surface. */
     scrollElementIntoView(params: {
         element: Element | Range;
         viewPosition?: number;

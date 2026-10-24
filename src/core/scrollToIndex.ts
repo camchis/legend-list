@@ -26,13 +26,14 @@ export function scrollToIndex(
     ctx: StateContext,
     {
         index,
+        key,
         viewOffset = 0,
         animated = true,
         forceScroll,
         isInitialScroll,
         viewPosition,
         viewPositionFallback,
-    }: ScrollToIndexParams & { forceScroll?: boolean; isInitialScroll?: boolean },
+    }: ScrollToIndexParams & { forceScroll?: boolean; isInitialScroll?: boolean; key?: string },
 ) {
     const state = ctx.state;
     const { data } = state.props;
@@ -52,6 +53,7 @@ export function scrollToIndex(
         animated,
         forceScroll,
         index,
+        ...(key !== undefined ? { key } : {}),
         isInitialScroll,
         itemSize,
         offset: firstIndexOffset,

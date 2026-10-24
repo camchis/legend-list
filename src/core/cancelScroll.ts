@@ -38,7 +38,12 @@ export function cancelScroll(
     if (wasAnimating && stopAnimation) {
         // Stop at the scroller's own raw offset when it reports one, avoiding an RTL round trip.
         const x = state.props.horizontal
-            ? (scroller?.getCurrentScrollOffset?.() ?? toNativeHorizontalOffset(state, observed, getContentSize(ctx)))
+            ? (scroller?.getCurrentScrollOffset?.() ??
+              toNativeHorizontalOffset(
+                  state,
+                  observed,
+                  Math.max(getContentSize(ctx), state.props.contentContainerMinSize ?? 0),
+              ))
             : 0;
         scroller?.scrollTo({ animated: false, x, y: state.props.horizontal ? 0 : observed });
     }

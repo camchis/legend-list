@@ -48,6 +48,34 @@ describe("checkResetContainers", () => {
         checkThresholdsSpy.mockRestore();
     });
 
+    it.each([false, true])("retains end measurements only while following or deferred (pending=%s)", (pending) => {
+        const previousData = state.props.data;
+        const data = [...previousData, { id: "item-3", value: "C" }];
+        state.previousData = previousData;
+        state.props.data = data;
+        state.props.maintainScrollAtEnd = { on: { dataChange: true } };
+        state.pendingEndMeasurements = new Set(["item-2", "removed-key"]);
+        doMaintainScrollAtEndSpy.mockImplementation(() => {
+            state.pendingMaintainScrollAtEnd = pending;
+            return false;
+        });
+
+        checkResetContainers(ctx, data);
+
+        expect(state.pendingEndMeasurements).toEqual(pending ? new Set(["item-2", "item-3"]) : undefined);
+    });
+
+    it("retains appended measurements after an immediate follow", () => {
+        const previousData = state.props.data;
+        const data = [...previousData, { id: "item-3", value: "C" }];
+        state.previousData = previousData;
+        state.props.data = data;
+        state.props.maintainScrollAtEnd = { on: { dataChange: true } };
+        doMaintainScrollAtEndSpy.mockReturnValue(true);
+        checkResetContainers(ctx, data);
+        expect(state.pendingEndMeasurements).toEqual(new Set(["item-3"]));
+    });
+
     it("skips key extraction for an unchanged reference prefix in append mode", () => {
         const previousData = Array.from({ length: 5000 }, (_, id) => ({ id }));
         const data = [...previousData, { id: 5000 }];
@@ -55,7 +83,7 @@ describe("checkResetContainers", () => {
         state.previousData = previousData;
         state.props.data = data;
         state.props.keyExtractor = keyExtractor;
-        state.props.maintainScrollAtEnd = { on: { dataChange: "append", itemLayout: true } };
+        state.props.maintainScrollAtEnd = { on: { dataAppend: true, itemLayout: true } };
         checkResetContainers(ctx, data);
         expect(keyExtractor).not.toHaveBeenCalled();
         expect(doMaintainScrollAtEndSpy).toHaveBeenCalled();

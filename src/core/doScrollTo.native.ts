@@ -18,12 +18,7 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
 
     if (!params.isAdjustment) {
         // Explicit requests own their momentum; MVCP re-assertions keep the gesture's ownership.
-        state.releasedFromUserDrag = false;
-        state.didDeferMaintainScrollAtEndForMomentum = false;
-        state.momentumSuspendContentSize = undefined;
-        state.momentumSuspendCompensated = false;
-        state.scheduledWork.cancel("endFollowRearm");
-        state.scheduledWork.cancel("userMomentumStallCheck");
+        state.userScrollContentSize = undefined;
     }
 
     const isHorizontal = !!horizontal;
@@ -45,11 +40,9 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
         checkFinishedScroll(ctx);
     }
 
-    // If it's animated we can rely on onMomentumScrollEnd to call finishScrollTo
-    // so if it's not aniamted we set it up here
     if (!isAnimated) {
         state.scroll = offset;
-
-        checkFinishedScrollFallback(ctx);
     }
+    // Native can accept an animated request without emitting any completion events.
+    checkFinishedScrollFallback(ctx);
 }

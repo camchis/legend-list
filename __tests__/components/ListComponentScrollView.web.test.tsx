@@ -1,12 +1,19 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
+import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { Platform } from "@/platform/Platform";
+import { normalizeMaintainScrollAtEnd } from "@/utils/normalizeMaintainScrollAtEnd";
+import { invalidateHorizontalRTLScrollType } from "@/utils/rtl";
+import * as webScrollUtils from "../../src/components/webScrollUtils";
 import * as cancellationModule from "../../src/core/cancelScroll";
 import { clearWarnDevOnceForTests } from "../../src/utils/helpers";
+import { createMockContext } from "../__mocks__/createMockContext";
 import TestRenderer, { act } from "../helpers/testRenderer";
 
 type ScrollListener = (_event: Event) => void;
 
+const { getElementScrollPosition: measureElementScrollPosition, resolveExternalScrollOffset } = webScrollUtils;
 const scrollListeners = new Map<string, ScrollListener>();
 const addEventListener = mock((type: string, listener: ScrollListener) => {
     scrollListeners.set(type, listener);
@@ -22,11 +29,30 @@ let listPosition = 0;
 let ownerScroll = 0;
 let maxOffset = 0;
 let ownsInput = true;
+let borderWidth = 0;
+const originalGetComputedStyle = globalThis.getComputedStyle;
+beforeEach(() => {
+    globalThis.getComputedStyle = (() => ({
+        borderBottomWidth: `${borderWidth}px`,
+        borderLeftWidth: `${borderWidth}px`,
+        borderRightWidth: `${borderWidth}px`,
+    })) as typeof getComputedStyle;
+});
+afterEach(() => {
+    globalThis.getComputedStyle = originalGetComputedStyle;
+});
 let emitScroll: () => void;
+const getMaxOffset = mock(() => maxOffset);
+const getScrollPosition = mock(() => ({ x: ownerScroll, y: ownerScroll }));
+const ownsScrollInput = mock(() => ownsInput);
 const scrollableNode = {
     clientHeight: 200,
+    clientLeft: 0,
+    clientTop: 0,
     clientWidth: 200,
     getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    offsetHeight: 215,
+    offsetWidth: 215,
 };
 const mockCtx = {
     state: {
@@ -70,12 +96,12 @@ function registerWebScrollMocks() {
         getElementScrollPosition: () => ({ left: listPosition, top: listPosition }),
         getLayoutMeasurement: () => ({ height: 0, width: 0 }),
         getLayoutRectangle: () => ({ height: 0, width: 0, x: 0, y: 0 }),
-        getMaxOffset: () => maxOffset,
+        getMaxOffset,
         getScrollContentSize: () => ({ height: 0, width: 0 }),
-        getScrollPosition: () => ({ x: ownerScroll, y: ownerScroll }),
+        getScrollPosition,
         isWindowTarget: (target: unknown) => target === window,
-        ownsScrollInput: () => ownsInput,
-        resolveExternalScrollOffset: () => ({ left: 0, top: 0 }),
+        ownsScrollInput,
+        resolveExternalScrollOffset,
         resolveScrollableNode: () => scrollableNode,
         resolveScrollEventTarget: (_element: unknown, externalTarget: unknown) => {
             if (externalTarget !== undefined && externalTarget !== window) return externalTarget;
@@ -104,13 +130,22 @@ function resetMocks() {
     schedule.mockClear();
     flush.mockClear();
     cancel.mockClear();
+    getMaxOffset.mockClear();
+    getScrollPosition.mockClear();
+    ownsScrollInput.mockClear();
     supportsScrollEnd = false;
     listPosition = 0;
     ownerScroll = 0;
     maxOffset = 0;
     ownsInput = true;
+    scrollableNode.clientLeft = 0;
+    scrollableNode.clientTop = 0;
+    scrollableNode.offsetWidth = 215;
+    scrollableNode.offsetHeight = 215;
+    borderWidth = 0;
     mockCtx.state.props.data = [];
     mockCtx.state.props.onUserScroll = undefined;
+    mockCtx.state.props.maintainScrollAtEnd = undefined;
     mockCtx.state.props.horizontal = false;
     mockCtx.state.props.rtl = false;
     mockCtx.state.horizontalRTLScrollType = undefined;
@@ -135,15 +170,87 @@ describe("ListComponentScrollView (web)", () => {
         registerWebScrollMocks();
     });
 
+    it.each([false, true])("skips unused downward input DOM reads (end follow: %s)", async (following) => {
+        resetMocks();
+        maxOffset = 1000;
+        ownerScroll = 500;
+        mockCtx.state.props.maintainScrollAtEnd = following;
+        const { ListComponentScrollView } = await import(
+            "../../src/components/ListComponentScrollView?inactive-input-reads"
+        );
+        let renderer: TestRenderer.ReactTestRenderer;
+        act(() => {
+            renderer = TestRenderer.create(
+                <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll />,
+            );
+        });
+        getMaxOffset.mockClear();
+        getScrollPosition.mockClear();
+        ownsScrollInput.mockClear();
+        try {
+            scrollListeners.get("wheel")?.({ deltaY: 40 } as WheelEvent);
+            scrollListeners.get("wheel")?.({ deltaY: 30 } as WheelEvent);
+            scrollListeners.get("touchstart")?.({ touches: [{ clientY: 80 }] } as any);
+            scrollListeners.get("touchmove")?.({ touches: [{ clientY: 60 }] } as any);
+            expect(getMaxOffset).not.toHaveBeenCalled();
+            expect(getScrollPosition).not.toHaveBeenCalled();
+            expect(ownsScrollInput).not.toHaveBeenCalled();
+
+            mockCtx.state.props.onUserScroll = mock(() => {});
+            scrollListeners.get("keydown")?.({ key: "PageDown" } as KeyboardEvent);
+            expect(mockCtx.state.props.onUserScroll).toHaveBeenCalledTimes(1);
+            expect(ownsScrollInput).toHaveBeenCalledTimes(1);
+        } finally {
+            act(() => renderer!.unmount());
+        }
+    });
+
+    it("rechecks nested input ownership when it changes during a wheel gesture", async () => {
+        resetMocks();
+        maxOffset = 1000;
+        ownerScroll = 500;
+        mockCtx.state.maintainingScrollAtEnd = true;
+        const onUserScroll = mock(() => {});
+        mockCtx.state.props.onUserScroll = onUserScroll;
+        const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+        const { ListComponentScrollView } = await import(
+            "../../src/components/ListComponentScrollView?changing-nested-input-owner"
+        );
+        let renderer: TestRenderer.ReactTestRenderer;
+        act(() => {
+            renderer = TestRenderer.create(
+                <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll />,
+            );
+        });
+        const target = {};
+        try {
+            ownsInput = false;
+            scrollListeners.get("wheel")?.({ deltaY: -40, target, timeStamp: 0 } as any);
+            expect(interrupt).not.toHaveBeenCalled();
+            expect(onUserScroll).not.toHaveBeenCalled();
+            ownsInput = true;
+            scrollListeners.get("wheel")?.({ deltaY: -30, target, timeStamp: 16 } as any);
+            expect(ownsScrollInput).toHaveBeenLastCalledWith(target, scrollableNode, false, -30);
+            expect(interrupt).toHaveBeenCalledTimes(1);
+            expect(onUserScroll).toHaveBeenCalledTimes(1);
+            scrollListeners.get("wheel")?.({ deltaY: -22, target, timeStamp: 32 } as any);
+            expect(onUserScroll).toHaveBeenCalledTimes(1);
+        } finally {
+            act(() => renderer!.unmount());
+            interrupt.mockRestore();
+        }
+    });
+
     for (const scenario of [
         "delayed wheel delivery",
         "nested wheel continuation",
+        "nested wheel begins during navigation",
         "touch hold",
         "initial end wheel",
         "initial end key",
         "initial end touch",
         "initial history wheel",
-        "overlay drag",
+        "unmeasured overlay drag",
         "classic drag",
         "pointer release",
         "pointer cancel",
@@ -175,7 +282,18 @@ describe("ListComponentScrollView (web)", () => {
                         <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll />,
                     );
                 });
-                if (scenario === "delayed wheel delivery" || scenario === "nested wheel continuation") {
+                if (scenario === "nested wheel begins during navigation") {
+                    mockCtx.state.scrollingTo = { index: 80 };
+                    mockCtx.state.pendingScrollResolve = mock();
+                    ownsInput = false;
+                    wheel(40, 0);
+                    expect(interrupt).not.toHaveBeenCalled();
+                    expect(onUserScroll).not.toHaveBeenCalled();
+                    ownsInput = true;
+                    wheel(30, 16);
+                    expect(interrupt).toHaveBeenCalledTimes(1);
+                    expect(onUserScroll).toHaveBeenCalledTimes(1);
+                } else if (scenario === "delayed wheel delivery" || scenario === "nested wheel continuation") {
                     wheel(40, 0);
                     if (scenario === "nested wheel continuation") ownsInput = false;
                     clock.mockReturnValue(1090);
@@ -220,12 +338,14 @@ describe("ListComponentScrollView (web)", () => {
                     expect(interrupt).not.toHaveBeenCalled();
                     expect(onUserScroll).toHaveBeenCalledTimes(1);
                 } else {
+                    if (scenario === "unmeasured overlay drag") scrollableNode.offsetWidth = 200;
                     send("pointerdown", {
                         clientX: scenario === "classic drag" ? 200 : 195,
                         clientY: 80,
                         defaultPrevented: scenario === "prevented press",
                         target: scenario === "content press" ? {} : scrollableNode,
                     });
+                    if (scenario === "unmeasured overlay drag") send("pointermove", { clientY: 70 });
                     if (scenario === "pointer release") send("pointerup");
                     if (scenario === "pointer cancel") send("pointercancel");
                     send("scroll");
@@ -233,9 +353,7 @@ describe("ListComponentScrollView (web)", () => {
                     send("scroll");
                     ownerScroll = 350;
                     if (scenario !== "stationary press") send("scroll");
-                    expect(onUserScroll).toHaveBeenCalledTimes(
-                        ["overlay drag", "classic drag"].includes(scenario) ? 1 : 0,
-                    );
+                    expect(onUserScroll).toHaveBeenCalledTimes(scenario === "classic drag" ? 1 : 0);
                 }
             } finally {
                 act(() => renderer?.unmount());
@@ -245,7 +363,191 @@ describe("ListComponentScrollView (web)", () => {
         });
     }
 
-    for (const mode of ["vertical", "negative", "inverted"] as const) {
+    for (const moved of [false, true]) {
+        it(`rearms following after a stationary scrollbar release (moved: ${moved})`, async () => {
+            resetMocks();
+            const previous = { ...mockCtx };
+            const platform = Platform.OS;
+            Platform.OS = "web";
+            const ctx = createMockContext(
+                { isFollowingEnd: true, isWithinMaintainScrollAtEndThreshold: true, totalSize: 1200 },
+                {
+                    didContainersLayout: true,
+                    didFinishInitialScroll: true,
+                    props: { maintainScrollAtEnd: normalizeMaintainScrollAtEnd(true) },
+                    scroll: 1000,
+                    scrollLength: 200,
+                },
+            );
+            Object.assign(mockCtx, ctx);
+            mockCtx.scrollToEnd = mock(() => true);
+            maxOffset = ownerScroll = 1000;
+            const { ListComponentScrollView } = await import(
+                "../../src/components/ListComponentScrollView?stationary-scrollbar-release"
+            );
+            let renderer: TestRenderer.ReactTestRenderer | undefined;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(
+                        <ListComponentScrollView onLayout={() => {}} onScroll={() => {}} style={{}} useWindowScroll />,
+                    );
+                });
+                scrollListeners.get("pointerdown")?.({ clientX: 205, clientY: 80, target: scrollableNode } as any);
+                expect(ctx.values.get("isFollowingEnd")).toBe(false);
+                if (moved) ownerScroll = 800;
+                scrollListeners.get("pointerup")?.({} as Event);
+                expect(ctx.values.get("isFollowingEnd")).toBe(!moved);
+                ctx.values.set("totalSize", 1300);
+                ctx.values.set("isWithinMaintainScrollAtEndThreshold", false);
+                doMaintainScrollAtEnd(mockCtx, { immediate: true });
+                expect(mockCtx.scrollToEnd).toHaveBeenCalledTimes(moved ? 0 : 1);
+            } finally {
+                act(() => renderer?.unmount());
+                ctx.state.scheduledWork.dispose();
+                Object.assign(mockCtx, previous);
+                Platform.OS = platform;
+            }
+        });
+    }
+
+    for (const horizontal of [false, true]) {
+        it(`keeps animation ownership during a blank ${horizontal ? "horizontal" : "vertical"} scroll-node press`, async () => {
+            resetMocks();
+            maxOffset = 1000;
+            ownerScroll = 500;
+            mockCtx.state.props.horizontal = horizontal;
+            mockCtx.state.scrollingTo = { animated: true, index: 80 };
+            mockCtx.state.pendingScrollResolve = mock();
+            const onUserScroll = mock();
+            mockCtx.state.props.onUserScroll = onUserScroll;
+            const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+            const { ListComponentScrollView } = await import(
+                "../../src/components/ListComponentScrollView?blank-pointer-animation"
+            );
+            let renderer: TestRenderer.ReactTestRenderer | undefined;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(
+                        <ListComponentScrollView
+                            horizontal={horizontal}
+                            onScroll={() => {}}
+                            style={{}}
+                            useWindowScroll
+                        />,
+                    );
+                });
+                scrollListeners.get("pointerdown")?.({
+                    clientX: 100,
+                    clientY: 100,
+                    pointerType: "mouse",
+                    target: scrollableNode,
+                } as any);
+                // Only the existing programmatic animation moves the scroll offset.
+                ownerScroll = 600;
+                scrollListeners.get("scroll")?.({} as Event);
+                // Moving over blank content still does not establish scrollbar ownership.
+                scrollListeners.get("pointermove")?.({ clientX: 110, clientY: 110 } as any);
+                ownerScroll = 700;
+                scrollListeners.get("scroll")?.({} as Event);
+                expect(interrupt).not.toHaveBeenCalled();
+                expect(onUserScroll).not.toHaveBeenCalled();
+            } finally {
+                act(() => renderer?.unmount());
+                interrupt.mockRestore();
+            }
+        });
+    }
+
+    for (const side of ["left", "right"] as const) {
+        it(`recognizes the actual RTL scrollbar gutter on the ${side} edge`, async () => {
+            resetMocks();
+            maxOffset = 1000;
+            ownerScroll = 500;
+            scrollableNode.clientLeft = 15;
+            mockCtx.state.props.rtl = true;
+            mockCtx.state.scrollingTo = { animated: true, index: 80 };
+            mockCtx.state.pendingScrollResolve = mock();
+            const onUserScroll = mock();
+            mockCtx.state.props.onUserScroll = onUserScroll;
+            const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+            const { ListComponentScrollView } = await import(
+                "../../src/components/ListComponentScrollView?rtl-pointer-gutter"
+            );
+            let renderer: TestRenderer.ReactTestRenderer | undefined;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(
+                        <ListComponentScrollView onScroll={() => {}} style={{}} useWindowScroll />,
+                    );
+                });
+                scrollListeners.get("pointerdown")?.({
+                    clientX: side === "left" ? 5 : 205,
+                    clientY: 100,
+                    pointerType: "mouse",
+                    target: scrollableNode,
+                } as any);
+                expect(interrupt).toHaveBeenCalledTimes(side === "left" ? 1 : 0);
+                expect(onUserScroll).toHaveBeenCalledTimes(side === "left" ? 1 : 0);
+            } finally {
+                act(() => renderer?.unmount());
+                interrupt.mockRestore();
+            }
+        });
+    }
+
+    for (const scenario of ["overlay", "border", "horizontal gutter"] as const) {
+        it(`attributes only measured scrollbar gutters for ${scenario}`, async () => {
+            resetMocks();
+            maxOffset = 1000;
+            ownerScroll = 500;
+            const horizontal = scenario === "horizontal gutter";
+            mockCtx.state.props.horizontal = horizontal;
+            mockCtx.state.scrollingTo = { animated: true, index: 80 };
+            mockCtx.state.pendingScrollResolve = mock();
+            const onUserScroll = mock();
+            mockCtx.state.props.onUserScroll = onUserScroll;
+            const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+            if (scenario !== "horizontal gutter") {
+                borderWidth = scenario === "border" ? 2 : 0;
+                scrollableNode.clientLeft = borderWidth;
+                scrollableNode.clientTop = borderWidth;
+                scrollableNode.offsetWidth = 200 + 2 * borderWidth;
+                scrollableNode.offsetHeight = 200 + 2 * borderWidth;
+            }
+            const { ListComponentScrollView } = await import(
+                "../../src/components/ListComponentScrollView?measured-pointer-gutters"
+            );
+            let renderer: TestRenderer.ReactTestRenderer | undefined;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(
+                        <ListComponentScrollView
+                            horizontal={horizontal}
+                            onScroll={() => {}}
+                            style={{}}
+                            useWindowScroll
+                        />,
+                    );
+                });
+                scrollListeners.get("pointerdown")?.({
+                    clientX: horizontal ? 100 : scrollableNode.offsetWidth - 1,
+                    clientY: horizontal ? 205 : 100,
+                    pointerType: "mouse",
+                    target: scrollableNode,
+                } as any);
+                scrollListeners.get("pointermove")?.({ clientX: 195, clientY: 110 } as any);
+                ownerScroll = 600;
+                scrollListeners.get("scroll")?.({} as Event);
+                expect(interrupt).toHaveBeenCalledTimes(horizontal ? 1 : 0);
+                expect(onUserScroll).toHaveBeenCalledTimes(horizontal ? 1 : 0);
+            } finally {
+                act(() => renderer?.unmount());
+                interrupt.mockRestore();
+            }
+        });
+    }
+
+    for (const mode of ["vertical", "normal", "negative", "inverted"] as const) {
         it(`keeps intended end navigation owned in ${mode} coordinates`, async () => {
             resetMocks();
             maxOffset = 1000;
@@ -268,7 +570,7 @@ describe("ListComponentScrollView (web)", () => {
                             createNodeMock: () => ({
                                 addEventListener,
                                 removeEventListener,
-                                scrollLeft: mode === "negative" ? -950 : 50,
+                                scrollLeft: mode === "normal" ? 950 : mode === "negative" ? -950 : 50,
                                 scrollTo() {},
                                 scrollTop: 950,
                             }),
@@ -283,10 +585,33 @@ describe("ListComponentScrollView (web)", () => {
                 mockCtx.state.scroll = 950;
                 scrollListeners.get("scroll")?.({} as Event);
                 expect(interrupt).not.toHaveBeenCalled();
-                scrollListeners.get("wheel")?.({ deltaX: horizontal ? -40 : 0, deltaY: 40 } as WheelEvent);
-                expect(interrupt).not.toHaveBeenCalled();
-                scrollListeners.get("wheel")?.({ deltaX: horizontal ? 40 : 0, deltaY: -40 } as WheelEvent);
-                expect(interrupt).toHaveBeenCalledTimes(1);
+                const towardEnd = mode === "normal" ? 40 : -40;
+                for (const input of ["wheel", "touch", "keyboard"] as const) {
+                    interrupt.mockClear();
+                    const navigate = (direction: number) => {
+                        if (input === "wheel") {
+                            scrollListeners.get("wheel")?.({
+                                deltaX: horizontal ? direction * towardEnd : 0,
+                                deltaY: direction * 40,
+                            } as WheelEvent);
+                        } else if (input === "touch") {
+                            const touch = (position: number) =>
+                                ({ touches: [{ clientX: position, clientY: position }] }) as unknown as TouchEvent;
+                            scrollListeners.get("touchstart")?.(touch(100));
+                            scrollListeners.get("touchmove")?.(touch(100 - direction * (horizontal ? towardEnd : 40)));
+                        } else {
+                            const forward = horizontal ? (towardEnd > 0 ? "ArrowRight" : "ArrowLeft") : "ArrowDown";
+                            const backward = horizontal ? (towardEnd > 0 ? "ArrowLeft" : "ArrowRight") : "ArrowUp";
+                            scrollListeners.get("keydown")?.({
+                                key: direction > 0 ? forward : backward,
+                            } as KeyboardEvent);
+                        }
+                    };
+                    navigate(1);
+                    expect(interrupt).not.toHaveBeenCalled();
+                    navigate(-1);
+                    expect(interrupt).toHaveBeenCalledTimes(1);
+                }
             } finally {
                 act(() => renderer?.unmount());
                 interrupt.mockRestore();
@@ -360,6 +685,169 @@ describe("ListComponentScrollView (web)", () => {
             act(() => renderer?.unmount());
         }
     });
+
+    for (const useWindowScroll of [false, true]) {
+        it.each([
+            ["ltr", 0],
+            ["rtl", 0],
+            ["ltr", 15],
+            ["rtl", 15],
+        ] as const)(
+            `normalizes nonzero horizontal origins for %s owners (scrollbar=%s, window=${useWindowScroll})`,
+            async (direction, scrollbarWidth) => {
+                resetMocks();
+                const platform = Platform.OS;
+                const previousWindow = {
+                    document: window.document,
+                    innerWidth: window.innerWidth,
+                    scrollX: window.scrollX,
+                    scrollY: window.scrollY,
+                };
+                Platform.OS = "web";
+                maxOffset = 500;
+                mockCtx.state.props.horizontal = true;
+                mockCtx.state.props.rtl = true;
+                globalThis.getComputedStyle = (() => ({ direction })) as typeof getComputedStyle;
+                const ref = { current: null as any };
+                const previousScroller = mockCtx.state.refScroller;
+                mockCtx.state.refScroller = ref;
+                const onScroll = mock();
+                const rtl = direction === "rtl";
+                const origin = rtl ? -650 : 150;
+                ownerScroll = rtl ? -150 : 150;
+                const scrollTo = mock((options: ScrollToOptions) => {
+                    ownerScroll = options.left ?? 0;
+                    Object.assign(window, { scrollX: ownerScroll });
+                });
+                const owner = {
+                    addEventListener,
+                    clientLeft: 3,
+                    clientTop: 0,
+                    clientWidth: 500,
+                    getBoundingClientRect: () => ({ left: 20, top: 0 }),
+                    removeEventListener,
+                    get scrollLeft() {
+                        return ownerScroll;
+                    },
+                    scrollTo,
+                } as unknown as HTMLElement;
+                const list = {
+                    addEventListener,
+                    getBoundingClientRect: () => ({
+                        left: origin - ownerScroll + (useWindowScroll ? 0 : 23),
+                        top: 0,
+                        width: 1000,
+                    }),
+                    removeEventListener,
+                    scrollTo,
+                };
+                Object.assign(window, {
+                    document: { documentElement: { clientWidth: 500 } },
+                    innerWidth: 500 + scrollbarWidth,
+                    scrollX: ownerScroll,
+                    scrollY: 0,
+                });
+                const measure = spyOn(webScrollUtils, "getElementScrollPosition").mockImplementation(
+                    measureElementScrollPosition,
+                );
+                const { ListComponentScrollView } = await import(
+                    "../../src/components/ListComponentScrollView?external-nonzero-rtl-origin"
+                );
+                let renderer: TestRenderer.ReactTestRenderer | undefined;
+                try {
+                    act(() => {
+                        renderer = TestRenderer.create(
+                            <ListComponentScrollView
+                                horizontal
+                                onLayout={() => {}}
+                                onScroll={onScroll}
+                                ref={ref}
+                                scrollElement={useWindowScroll ? undefined : owner}
+                                style={{}}
+                                useWindowScroll={useWindowScroll}
+                            >
+                                <div />
+                            </ListComponentScrollView>,
+                            { createNodeMock: () => list },
+                        );
+                    });
+                    invalidateHorizontalRTLScrollType(mockCtx.state);
+                    expect(ref.current.getRawScrollOffset()).toBe(0);
+                    ref.current.scrollTo({ animated: false, x: rtl ? -200 : 200 });
+                    expect(ownerScroll).toBe(rtl ? -350 : 350);
+                    expect(ref.current.getRawScrollOffset()).toBe(rtl ? -200 : 200);
+                    expect(ref.current.getCurrentScrollOffset()).toBe(rtl ? -200 : 200);
+                    expect(ref.current.isScrollInRange()).toBe(true);
+                    emitScroll();
+                    expect(onScroll.mock.calls.at(-1)?.[0].nativeEvent.contentOffset.x).toBe(rtl ? -200 : 200);
+                } finally {
+                    act(() => renderer?.unmount());
+                    measure.mockRestore();
+                    Object.assign(window, previousWindow);
+                    Platform.OS = platform;
+                    mockCtx.state.refScroller = previousScroller;
+                }
+            },
+        );
+    }
+
+    for (const useWindowScroll of [false, true]) {
+        it.each(["ltr", "rtl"])(`handles %s owner offsets (window=${useWindowScroll})`, async (ownerDirection) => {
+            resetMocks();
+            const platform = Platform.OS;
+            Platform.OS = "web";
+            maxOffset = 1000;
+            mockCtx.state.props.horizontal = true;
+            mockCtx.state.props.rtl = true;
+            globalThis.getComputedStyle = (() => ({ direction: ownerDirection })) as typeof getComputedStyle;
+            const { ListComponentScrollView } = await import(
+                "../../src/components/ListComponentScrollView?external-negative-rtl"
+            );
+            const ref = { current: null as any };
+            const previousScroller = mockCtx.state.refScroller;
+            mockCtx.state.refScroller = ref;
+            const scrollTo = mock((options: ScrollToOptions) => {
+                ownerScroll = options.left ?? 0;
+            });
+            const owner = { addEventListener, removeEventListener, scrollTo } as unknown as HTMLElement;
+            let renderer: TestRenderer.ReactTestRenderer | undefined;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(
+                        <ListComponentScrollView
+                            horizontal
+                            onLayout={() => {}}
+                            ref={ref}
+                            scrollElement={useWindowScroll ? undefined : owner}
+                            style={{}}
+                            useWindowScroll={useWindowScroll}
+                        >
+                            <div />
+                        </ListComponentScrollView>,
+                        { createNodeMock: () => ({ addEventListener, removeEventListener, scrollTo }) },
+                    );
+                });
+                invalidateHorizontalRTLScrollType(mockCtx.state);
+                ref.current.scrollTo({ animated: false, x: -350 });
+                const rtlOwner = ownerDirection === "rtl";
+                expect(scrollTo).toHaveBeenLastCalledWith({
+                    behavior: "instant",
+                    left: rtlOwner ? -350 : 0,
+                    top: 0,
+                });
+                expect(ref.current.getCurrentScrollOffset()).toBe(rtlOwner ? -350 : 0);
+                expect(ref.current.isScrollInRange()).toBe(true);
+                ownerScroll = -350;
+                expect(ref.current.isScrollInRange()).toBe(rtlOwner);
+                ref.current.scrollTo({ animated: false, x: -1500 });
+                expect(ref.current.getCurrentScrollOffset()).toBe(rtlOwner ? -1000 : 0);
+            } finally {
+                act(() => renderer?.unmount());
+                Platform.OS = platform;
+                mockCtx.state.refScroller = previousScroller;
+            }
+        });
+    }
 
     for (const useWindowScroll of [false, true]) {
         for (const horizontal of [false, true]) {
@@ -455,6 +943,41 @@ describe("ListComponentScrollView (web)", () => {
         expect(scrollListeners.has("wheel")).toBe(false);
     });
 
+    it("leaves navigation keys in contenteditable editors without an explicit true attribute", async () => {
+        resetMocks();
+        maxOffset = 1000;
+        ownerScroll = 800;
+        mockCtx.state.scrollingTo = { animated: true, index: 50 };
+        mockCtx.state.pendingScrollResolve = mock(() => {});
+        const onUserScroll = mock(() => {});
+        mockCtx.state.props.onUserScroll = onUserScroll;
+        const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+        const { ListComponentScrollView } = await import(
+            "../../src/components/ListComponentScrollView?editable-input-owner"
+        );
+        let renderer: TestRenderer.ReactTestRenderer | undefined;
+        try {
+            act(() => {
+                renderer = TestRenderer.create(
+                    <ListComponentScrollView onLayout={() => {}} style={{}} useWindowScroll />,
+                );
+            });
+            const target = {
+                // Empty, plaintext-only, and inherited editing all set this DOM property.
+                closest: () => null,
+                isContentEditable: true,
+            };
+            for (const key of ["ArrowUp", "PageDown", "Home", "End"]) {
+                scrollListeners.get("keydown")?.({ key, target } as any);
+            }
+            expect(interrupt).not.toHaveBeenCalled();
+            expect(onUserScroll).not.toHaveBeenCalled();
+        } finally {
+            act(() => renderer?.unmount());
+            interrupt.mockRestore();
+        }
+    });
+
     for (const horizontal of [false, true]) {
         it(`filters input before interrupting an active ${horizontal ? "horizontal" : "vertical"} request on an external owner`, async () => {
             resetMocks();
@@ -501,7 +1024,7 @@ describe("ListComponentScrollView (web)", () => {
                 send("wheel", delta);
                 send("keydown", { key: horizontal ? "ArrowLeft" : "ArrowDown" });
                 send("touchstart", touch);
-                expect(interrupt).toHaveBeenCalledTimes(2);
+                expect(interrupt).toHaveBeenCalledTimes(3);
             } finally {
                 act(() => renderer?.unmount());
                 interrupt.mockRestore();
@@ -511,6 +1034,7 @@ describe("ListComponentScrollView (web)", () => {
 
     it("interrupts end following for upward keys and scrollbar presses while the list is in range", async () => {
         resetMocks();
+        mockCtx.state.maintainingScrollAtEnd = true;
         maxOffset = 1000;
         ownerScroll = 800;
         const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});

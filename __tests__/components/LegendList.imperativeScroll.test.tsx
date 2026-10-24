@@ -4,13 +4,19 @@ import "../setup";
 import * as React from "react";
 
 import type { ScrollAdjustHandler } from "../../src/core/ScrollAdjustHandler";
-import type { StateContext } from "../../src/state/state";
+import { peek$, type StateContext } from "../../src/state/state";
 import type { LegendListRef } from "../../src/types";
 import TestRenderer, { act } from "../helpers/testRenderer";
 
 let lastListProps: any;
 let scrollToIndexCalls: any[] = [];
 const handlerInstances: ScrollAdjustHandler[] = [];
+
+const suspended = new Promise<void>(() => {});
+function SuspenseGate({ hidden }: { hidden: boolean }) {
+    if (hidden) throw suspended;
+    return null;
+}
 
 function registerImperativeScrollMocks() {
     mock.module("@/components/ListComponent", () => ({
@@ -82,6 +88,68 @@ beforeEach(() => {
 });
 
 describe("LegendList imperative scrolls", () => {
+    it.each([false, true])("clears cancelled activity across Suspense reconnect (queued: %s)", async (queued) => {
+        const { LegendList } = await import("../../src/components/LegendList?imperative-scroll-suspense-activity");
+        const data = createData(100);
+        const ref = React.createRef<LegendListRef>();
+        const list = (hidden: boolean) => (
+            <React.Suspense fallback={null}>
+                <LegendList
+                    data={data}
+                    estimatedItemSize={100}
+                    getFixedItemSize={() => 100}
+                    recycleItems={false}
+                    ref={ref}
+                    renderItem={() => null}
+                />
+                <SuspenseGate hidden={hidden} />
+            </React.Suspense>
+        );
+        let renderer: ReturnType<typeof TestRenderer.create> | undefined;
+        try {
+            act(() => {
+                renderer = TestRenderer.create(list(false));
+            });
+            const ctx = lastListProps.scrollAdjustHandler.context as StateContext;
+            const { state } = ctx;
+            if (queued) state.activeSizeAnimations = new Set(["totalSize"]);
+            const settled = mock();
+            const request = ref.current!.scrollToOffset({ animated: true, offset: 5000 });
+            void request.then(settled);
+            expect(peek$(ctx, "isScrollActive")).toBe(true);
+            expect(state.pendingScrollResolve).toBeDefined();
+            expect(ctx.scrollRequestTracker!.isWaitingToRun()).toBe(queued);
+            expect(state.scheduledWork.has("imperativeScrollReady")).toBe(queued);
+            if (queued) {
+                expect(state.scrollingTo).toBeUndefined();
+            } else {
+                expect(state.scrollingTo).toMatchObject({ animated: true, offset: 5000 });
+            }
+
+            act(() => renderer!.update(list(true)));
+            expect(state.isUnmounted).toBe(true);
+            expect(state.pendingScrollResolve).toBeUndefined();
+            expect(state.scrollingTo).toBeUndefined();
+            expect(state.scheduledWork.has("imperativeScrollReady")).toBe(false);
+            expect(ctx.scrollRequestTracker!.isWaitingToRun()).toBe(false);
+            expect(peek$(ctx, "isScrollActive")).toBe(false);
+            expect(await request).toEqual({ reason: "unreachable" });
+
+            state.activeSizeAnimations?.clear();
+            act(() => renderer!.update(list(false)));
+            await flushAsync();
+            expect(lastListProps.scrollAdjustHandler.context).toBe(ctx);
+            expect(state.isUnmounted).toBe(false);
+            expect(state.pendingScrollResolve).toBeUndefined();
+            expect(state.scrollingTo).toBeUndefined();
+            expect(peek$(ctx, "isScrollActive")).toBe(false);
+            expect(settled).toHaveBeenCalledTimes(1);
+            expect(settled).toHaveBeenCalledWith({ reason: "unreachable" });
+        } finally {
+            act(() => renderer?.unmount());
+        }
+    });
+
     it("resolves scrollToEnd against data committed after the imperative call", async () => {
         const { LegendList } = await import("../../src/components/LegendList?imperative-scroll-commit");
         let sendMessage: () => void = () => {};

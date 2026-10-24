@@ -8,6 +8,7 @@ import { checkResetContainers } from "../../src/core/checkResetContainers";
 import * as follow from "../../src/core/doMaintainScrollAtEnd";
 import * as platformScroll from "../../src/core/doScrollTo";
 import { doScrollTo as doNativeScrollTo } from "../../src/core/doScrollTo.native";
+import { emitMetrics } from "../../src/core/emitMetrics";
 import { finishInitialScroll } from "../../src/core/finishInitialScroll";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import { dispatchInitialScroll } from "../../src/core/initialScroll";
@@ -21,10 +22,12 @@ import { setFooterSize, setHeaderSize } from "../../src/core/updateContentMetric
 import { updateItemPositions } from "../../src/core/updateItemPositions";
 import { updateItemSizes, updateOneItemSize } from "../../src/core/updateItemSizes";
 import { updateScroll } from "../../src/core/updateScroll";
+import { armUserScrollSettle } from "../../src/core/userMomentum";
 import { Platform } from "../../src/platform/Platform";
 import { checkAtBottom } from "../../src/utils/checkAtBottom";
 import { createImperativeHandle } from "../../src/utils/createImperativeHandle";
 import { createMockContext } from "../__mocks__/createMockContext";
+import { installFakeClock } from "../helpers/webScrollHarness";
 
 const originalRAF = globalThis.requestAnimationFrame;
 const originalCancelRAF = globalThis.cancelAnimationFrame;
@@ -37,6 +40,37 @@ afterEach(() => {
 });
 
 describe("end follow intent", () => {
+    it("emits metrics when the gesture stall timer rearms end following", () => {
+        const clock = installFakeClock();
+        const onMetricsChange = mock(() => {});
+        const ctx = createMockContext(
+            { isFollowingEnd: false, isWithinMaintainScrollAtEndThreshold: true, totalSize: 1000 },
+            {
+                didContainersLayout: true,
+                didFinishInitialScroll: true,
+                endFollowInterrupted: true,
+                isMomentumScrolling: true,
+                lastNativeScrollTime: 0,
+                props: { data: [], maintainScrollAtEnd: {}, onMetricsChange, trackScrollMetrics: true },
+                scroll: 700,
+                scrollLength: 300,
+                scrollPending: 700,
+                userScrollContentSize: 1000,
+            },
+        );
+        try {
+            emitMetrics(ctx);
+            expect(onMetricsChange).toHaveBeenLastCalledWith(expect.objectContaining({ isFollowingEnd: false }));
+            armUserScrollSettle(ctx);
+            clock.advance(500);
+            expect(ctx.values.get("isFollowingEnd")).toBe(true);
+            expect(onMetricsChange).toHaveBeenLastCalledWith(expect.objectContaining({ isFollowingEnd: true }));
+        } finally {
+            ctx.state.scheduledWork.dispose();
+            clock.restore();
+        }
+    });
+
     it("keeps settled follow intent when a later measurement moves the end outside the threshold", async () => {
         let frame: FrameRequestCallback | undefined;
         globalThis.requestAnimationFrame = (cb) => {
@@ -122,7 +156,6 @@ describe("end follow intent", () => {
         );
         const handle = createImperativeHandle(ctx);
         const promise = handle.scrollToIndex({ animated: true, index: 0 });
-        const token = ctx.state.pendingScrollToEnd?.token;
         handle.cancelScroll();
         await promise;
         expect(ctx.state.scheduledWork.has("imperativeScrollReady")).toBe(false);
@@ -130,7 +163,6 @@ describe("end follow intent", () => {
         expect(ctx.state.pendingScrollResolve).toBeUndefined();
         expect(handle.getState().scroll).toBe(73);
         expect(scrollTo).not.toHaveBeenCalled();
-        if (token !== undefined) expect(ctx.scrollRequestTracker?.isCurrent(token)).toBe(false);
     });
 });
 
@@ -141,7 +173,7 @@ describe("canonical scroll geometry", () => {
             {
                 didFinishInitialScroll: true,
                 positions: [0, 100, 200],
-                props: { data: ["a", "b", "c"], keyExtractor: (item) => item },
+                props: { data: ["a", "b", "c"], getFixedItemSize: () => 100, keyExtractor: (item) => item },
                 refScroller: { current: { getCurrentScrollOffset: () => 250 } } as any,
                 scroll: 0,
                 startNoBuffer: 0,
@@ -213,7 +245,7 @@ describe("canonical scroll geometry", () => {
                 props: {
                     data: ["a", "b"],
                     keyExtractor: (item) => item,
-                    maintainScrollAtEnd: { on: { dataChange: "append" } },
+                    maintainScrollAtEnd: { on: { dataAppend: true } },
                 },
             },
         );
@@ -235,7 +267,7 @@ describe("canonical scroll geometry", () => {
                 props: {
                     data: ["a", "b"],
                     keyExtractor: undefined,
-                    maintainScrollAtEnd: { on: { dataChange: "append", itemLayout: false } },
+                    maintainScrollAtEnd: { on: { dataAppend: true, itemLayout: false } },
                 },
             },
         );
@@ -254,7 +286,7 @@ describe("canonical scroll geometry", () => {
                 props: {
                     data: ["a", "b"],
                     keyExtractor: (item) => item,
-                    maintainScrollAtEnd: { on: { dataChange: "append", itemLayout: false } },
+                    maintainScrollAtEnd: { on: { dataAppend: true, itemLayout: false } },
                 },
                 sizesKnown: new Map([["a", 100]]),
             },
@@ -264,6 +296,8 @@ describe("canonical scroll geometry", () => {
         ctx.state.props.data = ["a", "b", "c"];
         checkResetContainers(ctx, ctx.state.props.data);
         expect(ctx.state.pendingEndMeasurements).toEqual(new Set(["b", "c"]));
+        ctx.state.containerItemKeys.set("b", 0);
+        ctx.state.containerItemKeys.set("c", 1);
         follow.finishMaintainScrollAtEnd(ctx);
         updateItemSizes(ctx, { itemKey: "b", size: { height: 4000, width: 200 } });
         expect(ctx.state.pendingEndMeasurements).toEqual(new Set(["c"]));
@@ -273,7 +307,13 @@ describe("canonical scroll geometry", () => {
 
 describe("measured DOM navigation", () => {
     it("aligns an already visible citation at the requested viewport position", async () => {
-        const node = { getBoundingClientRect: () => ({ bottom: 500, top: 100 }) };
+        const node = {
+            clientHeight: 400,
+            clientLeft: 0,
+            clientTop: 0,
+            clientWidth: 200,
+            getBoundingClientRect: () => ({ bottom: 500, left: 0, top: 100 }),
+        };
         const element = { getBoundingClientRect: () => ({ bottom: 220, height: 20, top: 200 }), isConnected: true };
         const ctx = createMockContext(
             {},
@@ -293,7 +333,13 @@ describe("measured DOM navigation", () => {
     });
 
     function setupElementTarget(rect: { bottom: number; height: number; top: number }, isConnected = true) {
-        const node = { getBoundingClientRect: () => ({ bottom: 200, top: 0 }) };
+        const node = {
+            clientHeight: 200,
+            clientLeft: 0,
+            clientTop: 0,
+            clientWidth: 200,
+            getBoundingClientRect: () => ({ bottom: 200, left: 0, top: 0 }),
+        };
         const ctx = createMockContext(
             { totalSize: 100 },
             {
@@ -339,7 +385,13 @@ describe("measured DOM navigation", () => {
     });
 
     it.each([false, true])("reveals a horizontally displaced element (rtl=%s)", (rtl) => {
-        const node = { getBoundingClientRect: () => ({ bottom: 200, left: 0, right: 200, top: 0 }) };
+        const node = {
+            clientHeight: 200,
+            clientLeft: 0,
+            clientTop: 0,
+            clientWidth: 200,
+            getBoundingClientRect: () => ({ bottom: 200, left: 0, right: 200, top: 0 }),
+        };
         const element = {
             getBoundingClientRect: () => ({
                 bottom: 20,
@@ -567,7 +619,13 @@ describe("scroll ownership boundaries", () => {
     });
 
     it("releases the measured DOM target when its owned request settles", async () => {
-        const node = { getBoundingClientRect: () => ({ bottom: 200, top: 0 }) };
+        const node = {
+            clientHeight: 200,
+            clientLeft: 0,
+            clientTop: 0,
+            clientWidth: 200,
+            getBoundingClientRect: () => ({ bottom: 200, left: 0, top: 0 }),
+        };
         const element = { getBoundingClientRect: () => ({ bottom: 320, height: 20, top: 300 }), isConnected: true };
         const ctx = createMockContext(
             {},
@@ -593,7 +651,12 @@ describe("reading snapshots during dataset placement", () => {
     it("does not save an estimated bootstrap anchor or a not-yet-reset replacement", () => {
         const ctx = createMockContext(
             {},
-            { didFinishInitialScroll: false, initialScroll: { index: 90 }, positions: [0], props: { data: ["row"] } },
+            {
+                didFinishInitialScroll: false,
+                initialScroll: { index: 90 },
+                positions: [0],
+                props: { data: ["row"], getFixedItemSize: () => 100 },
+            },
         );
         const handle = createImperativeHandle(ctx);
         expect(handle.getScrollAnchor()).toBeUndefined();
@@ -668,6 +731,8 @@ describe("keyed navigation through layout changes", () => {
                     ...ctx.state.props.data,
                 ];
                 calculateItemsInView(ctx, { dataChanged: true, doMVCP: true });
+                // Keyed redispatch runs after the layout pass, before native events or animation frames.
+                await Promise.resolve();
                 if (mvcp || platform === "web") expect(ctx.state.scroll).toBe(6000);
                 // Native scroll events and momentum-end use the physical dispatched offset.
                 if (platform !== "web") {
@@ -1070,6 +1135,33 @@ describe("end follow rearm after settling", () => {
         expect(resolve).toHaveBeenCalled();
     }
 
+    it("keeps following an append after scrollIndexIntoView finds the last item already visible", async () => {
+        const ctx = setupAtEnd("web");
+        const frames: FrameRequestCallback[] = [];
+        globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+        Object.assign(ctx.state, {
+            indexByKey: new Map([["row", 0]]),
+            positions: [0],
+            props: { ...ctx.state.props, keyExtractor: (item: string) => item },
+            sizes: new Map([["row", 1000]]),
+            sizesKnown: new Map([["row", 1000]]),
+        });
+        try {
+            const handle = createImperativeHandle(ctx);
+            await handle.scrollIndexIntoView({ index: 0 });
+            expect(ctx.state.endFollowInterrupted).toBe(false);
+            expect(handle.getState().isFollowingEnd).toBe(true);
+            ctx.state.previousData = ["row"];
+            ctx.state.props.data = ["row", "next"];
+            ctx.values.set("totalSize", 1400);
+            checkResetContainers(ctx, ctx.state.props.data);
+            while (frames.length) frames.shift()?.(0);
+            expect(ctx.scrollToEnd).toHaveBeenCalledTimes(1);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
     for (const platform of ["web", "ios", "android"] as const) {
         for (const offset of [800, 790]) {
             it(`follows after an explicit scroll settles at ${offset} on ${platform}`, () => {
@@ -1134,18 +1226,27 @@ describe("end follow rearm after settling", () => {
         });
     }
 
-    for (const [offset, rearms] of [
-        [800, true],
-        [780, false],
-    ] as const) {
-        it(`${rearms ? "rearms" : "stays interrupted"} mid-drag when a native drag reaches ${offset}`, () => {
+    for (const offset of [800, 780]) {
+        it(`stays interrupted mid-drag when a native drag reaches ${offset}`, () => {
             const ctx = setupAtEnd("ios");
-            ctx.state.scroll = 600;
+            Object.assign(ctx.state, {
+                endBuffered: 2,
+                indexByKey: new Map([["row", 0]]),
+                positions: [0],
+                scroll: 600,
+                sizes: new Map([["row", 1000]]),
+                sizesKnown: new Map([["row", 1000]]),
+                startBuffered: 2,
+            });
             ctx.state.isDragging = true;
             interruptUserScroll(ctx);
             updateScroll(ctx, offset, true, { fromNativeScrollEvent: true });
             expect(ctx.state.isDragging).toBe(true);
-            expect(ctx.state.endFollowInterrupted).toBe(!rearms);
+            expect(ctx.state.endFollowInterrupted).toBe(true);
+            expect(createImperativeHandle(ctx).getState().isFollowingEnd).toBe(false);
+            ctx.state.isDragging = false;
+            updateItemSizes(ctx, { itemKey: "row", size: { height: 1300, width: 200 } });
+            expect(ctx.state.maintainingScrollAtEnd).toBeUndefined();
         });
     }
 

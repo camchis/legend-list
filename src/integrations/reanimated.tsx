@@ -144,7 +144,6 @@ interface ReanimatedPositionViewProps {
     style: StyleProp<ViewStyle>;
     refView: React.RefObject<View | null>;
     onLayout: (event: LayoutChangeEvent) => void;
-    recycleItems?: boolean;
     layoutTransition?: ReanimatedLayoutAnimation;
     children: React.ReactNode;
 }
@@ -218,7 +217,7 @@ const ReanimatedPositionViewSticky = typedMemo(function ReanimatedPositionViewSt
 
 const ReanimatedPositionView = typedMemo(function ReanimatedPositionViewComponent(props: ReanimatedPositionViewProps) {
     const ctx = useStateContext();
-    const { id, horizontal, style, refView, children, recycleItems: _recycleItems, layoutTransition, ...rest } = props;
+    const { id, horizontal, style, refView, children, layoutTransition, ...rest } = props;
     const [positionValue = POSITION_OUT_OF_VIEW, layoutReady = true, isScrollActive] = useArr$([
         `containerPosition${id}`,
         `containerLayoutReady${id}`,
@@ -228,8 +227,7 @@ const ReanimatedPositionView = typedMemo(function ReanimatedPositionViewComponen
     let shouldSkipTransitionForRecycleReuse = false;
 
     if (layoutTransition) {
-        const itemKeySignal = `containerItemKey${id}` as `containerItemKey${number}`;
-        const itemKey = peek$(ctx, itemKeySignal) as string | undefined;
+        const itemKey = peek$(ctx, `containerItemKey${id}`);
 
         shouldSkipTransitionForRecycleReuse =
             itemKey !== undefined && prevItemKeyRef.current !== undefined && prevItemKeyRef.current !== itemKey;
@@ -317,17 +315,17 @@ const ReanimatedSizeView = typedMemo(function ReanimatedSizeViewComponent({
         const suppliedTransition = layoutTransition as SizeTransition | undefined;
         const transition = suppliedTransition?.createInstance?.() ?? suppliedTransition;
         const animationAndConfig = transition?.getAnimationAndConfig?.();
-        if (!readyToRender || isFollowingEnd || isScrollActive || !!ctx.state.scrollingTo || !animationAndConfig) {
-            previousSize.current = logicalSize;
-            const run = ++runRef.current;
+        const skipAnimation =
+            !readyToRender || isFollowingEnd || isScrollActive || !!ctx.state.scrollingTo || !animationAndConfig;
+        if (!skipAnimation && logicalSize === previousSize.current) return;
+        previousSize.current = logicalSize;
+        const run = ++runRef.current;
+        if (skipAnimation) {
             cancelAnimation(visualSize);
             visualSize.value = logicalSize;
             complete(run);
             return;
         }
-        if (logicalSize === previousSize.current) return;
-        previousSize.current = logicalSize;
-        const run = ++runRef.current;
         const [animation, config] = animationAndConfig;
         const delayFunction =
             transition?.getDelayFunction?.() ??
@@ -364,7 +362,8 @@ const ReanimatedSizeView = typedMemo(function ReanimatedSizeViewComponent({
         () => () => {
             runRef.current++;
             cancelAnimation(visualSize);
-            ctx.state.activeSizeAnimations?.delete(signalName);
+            // Interrupted targets must restart on reveal without reading the UI shared value.
+            if (ctx.state.activeSizeAnimations?.delete(signalName)) previousSize.current = Number.NaN;
         },
         [ctx, signalName, visualSize],
     );
@@ -470,21 +469,13 @@ const LegendListForwardedRef = typedMemo(
         props: LegendListForwardedRefProps<ItemT>,
         ref: React.Ref<AnimatedScrollView>,
     ) {
-        const { itemLayoutAnimation, recycleItems, refLegendList, renderScrollComponent, sharedValues, ...rest } =
-            props;
+        const { itemLayoutAnimation, refLegendList, renderScrollComponent, sharedValues, ...rest } = props;
 
-        const refFn = useCallback(
-            (r: LegendListRef) => {
-                refLegendList(r);
-            },
-            [refLegendList],
-        );
         const internalScrollOffset = useSharedValue(0);
         const scrollOffset = sharedValues?.scrollOffset ?? internalScrollOffset;
         const trackedScrollOffset =
             sharedValues?.scrollOffset !== undefined || rest.stickyHeaderIndices?.length ? scrollOffset : undefined;
 
-        const shouldUseReanimatedScrollView = true;
         const renderScrollComponentForBridge = React.useMemo<ReanimatedScrollBridgeProps["renderScrollComponent"]>(
             () =>
                 renderScrollComponent
@@ -527,15 +518,9 @@ const LegendListForwardedRef = typedMemo(
             }
 
             return function PositionComponent(positionProps: PositionComponentInternalProps) {
-                return (
-                    <ReanimatedPositionView
-                        {...positionProps}
-                        layoutTransition={itemLayoutAnimationRef.current}
-                        recycleItems={recycleItems}
-                    />
-                );
+                return <ReanimatedPositionView {...positionProps} layoutTransition={itemLayoutAnimationRef.current} />;
             };
-        }, [hasItemLayoutAnimation, recycleItems]);
+        }, [hasItemLayoutAnimation]);
 
         const sizeComponentInternal = React.useMemo(() => {
             if (!hasItemLayoutAnimation) return undefined;
@@ -547,17 +532,12 @@ const LegendListForwardedRef = typedMemo(
         const legendListProps = {
             ...rest,
             positionComponentInternal,
-            recycleItems,
+            renderScrollComponent: renderReanimatedScrollComponent,
             sizeComponentInternal,
-            ...(shouldUseReanimatedScrollView
-                ? {
-                      renderScrollComponent: renderReanimatedScrollComponent,
-                      ...(IsNewArchitecture ? { stickyPositionComponentInternal } : {}),
-                  }
-                : {}),
+            ...(IsNewArchitecture ? { stickyPositionComponentInternal } : {}),
         };
 
-        return <LegendList ref={refFn} refScrollView={ref} {...(legendListProps as LegendListProps<ItemT>)} />;
+        return <LegendList ref={refLegendList} refScrollView={ref} {...(legendListProps as LegendListProps<ItemT>)} />;
     }),
 );
 

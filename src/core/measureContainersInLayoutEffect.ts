@@ -43,15 +43,15 @@ export function measureContainersInLayoutEffect(
             const bootstrap =
                 state.initialScrollSession?.kind === "bootstrap" ? state.initialScrollSession.bootstrap : undefined;
             if (bootstrap?.visibleIndices?.length && state.dataChangeEpoch === dataChangeEpoch) {
-                const measuredKeys = new Set(
-                    measurements
-                        .filter(
-                            ({ containerId, generation, itemKey }) =>
-                                peek$(ctx, `containerItemKey${containerId}`) === itemKey &&
-                                (state.containerItemGenerations[containerId] ?? 0) === generation,
-                        )
-                        .map(({ itemKey }) => itemKey),
-                );
+                const measuredKeys = new Set<string>();
+                for (const { containerId, generation, itemKey } of measurements) {
+                    if (
+                        peek$(ctx, `containerItemKey${containerId}`) === itemKey &&
+                        (state.containerItemGenerations[containerId] ?? 0) === generation
+                    ) {
+                        measuredKeys.add(itemKey);
+                    }
+                }
                 const isCurrentViewportMeasured = bootstrap.visibleIndices.every((index) =>
                     measuredKeys.has(getId(state, index)),
                 );

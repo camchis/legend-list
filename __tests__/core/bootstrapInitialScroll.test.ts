@@ -9,10 +9,13 @@ import {
     handleBootstrapInitialScrollLayoutChange,
 } from "../../src/core/bootstrapInitialScroll";
 import { interruptUserScroll } from "../../src/core/cancelScroll";
+import { doMaintainScrollAtEnd } from "../../src/core/doMaintainScrollAtEnd";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
+import { scrollToEnd } from "../../src/core/scrollToEnd";
 import { updateItemSizesBatch } from "../../src/core/updateItemSizes";
 import { Platform } from "../../src/platform/Platform";
 import type { StateContext } from "../../src/state/state";
+import { set$ } from "../../src/state/state";
 import { createMockContext } from "../__mocks__/createMockContext";
 import { installFakeClock } from "../helpers/webScrollHarness";
 
@@ -415,8 +418,21 @@ describe("bootstrapInitialScroll", () => {
         });
     });
 
-    it("retargets a finished initialScrollAtEnd target when new data extends the end", () => {
-        const data = Array.from({ length: 5 }, (_, index) => ({ id: `item-${index}` }));
+    it.each([
+        { ids: [0, 1, 2, 3, 4], maintain: undefined, name: "without maintenance" },
+        { ids: [0, 1, 2, 3, 4], maintain: { on: { layout: true } }, name: "layout-only maintenance" },
+        {
+            ids: [0, 1, 9, 3, 4],
+            maintain: { on: { dataAppend: true } },
+            name: "append-only maintenance with a replaced tail",
+        },
+        {
+            ids: [0, 1],
+            maintain: { on: { dataAppend: true } },
+            name: "append-only maintenance with shrinking data",
+        },
+    ])("retargets a finished initial end target ($name)", ({ maintain, ids }) => {
+        const data = ids.map((id) => ({ id: `item-${id}` }));
         const ctx = createMockContext(
             {
                 totalSize: 250,
@@ -437,10 +453,12 @@ describe("bootstrapInitialScroll", () => {
                     viewPosition: 1,
                 } as StateContext["state"]["initialScroll"],
                 positions: [0, 50, 100, 150, 200],
+                previousData: [0, 1, 2].map((id) => ({ id: `item-${id}` })),
                 props: {
                     data,
                     estimatedItemSize: 50,
                     keyExtractor: (item: { id: string }) => item.id,
+                    maintainScrollAtEnd: maintain,
                     stylePaddingBottom: 0,
                 },
                 refScroller: {
@@ -474,17 +492,98 @@ describe("bootstrapInitialScroll", () => {
         });
 
         expect(ctx.state.initialScroll).toMatchObject({
-            index: 4,
+            index: data.length - 1,
             preserveForBottomPadding: true,
             viewPosition: 1,
         });
         expect(ctx.state.initialScrollSession).toMatchObject({
             bootstrap: {
-                scroll: 150,
-                targetIndexSeed: 4,
+                targetIndexSeed: data.length - 1,
             },
             kind: "bootstrap",
         });
+    });
+
+    it("hands rapid appends to end following after initial scrolling has finished", async () => {
+        Platform.OS = "android";
+        const frames: FrameRequestCallback[] = [];
+        globalThis.requestAnimationFrame = (callback) => {
+            frames.push(callback);
+            return frames.length;
+        };
+        const initialData = Array.from({ length: 18 }, (_, index) => index);
+        const ctx = createMockContext(
+            { isFollowingEnd: true, totalSize: 1296 },
+            {
+                didContainersLayout: true,
+                didFinishInitialScroll: true,
+                initialScroll: { index: 17, preserveForBottomPadding: true, viewPosition: 1 },
+                props: {
+                    data: initialData,
+                    getFixedItemSize: () => 72,
+                    keyExtractor: (item: number) => String(item),
+                    maintainScrollAtEnd: { animated: true },
+                },
+                scroll: 613,
+                scrollLength: 683,
+                scrollPending: 613,
+            },
+        );
+        ctx.scrollToEnd = (options) => scrollToEnd(ctx, options);
+        const flushFrame = () => {
+            for (const callback of frames.splice(0)) callback(0);
+        };
+        const append = () => {
+            const previousDataLength = ctx.state.props.data.length;
+            const data = Array.from({ length: previousDataLength + 3 }, (_, index) => index);
+            ctx.state.props.data = data;
+            ctx.state.positions = data.map((index) => index * 72);
+            ctx.state.indexByKey = new Map(data.map((index) => [String(index), index]));
+            ctx.state.containerItemKeys = new Map(data.map((index) => [String(index), index]));
+            ctx.state.sizesKnown = new Map(data.map((index) => [String(index), 72]));
+            ctx.state.sizes = new Map(ctx.state.sizesKnown);
+            ctx.state.startBuffered = 0;
+            ctx.state.endBuffered = data.length - 1;
+            set$(ctx, "totalSize", data.length * 72);
+            handleBootstrapInitialScrollDataChange(ctx, {
+                dataLength: data.length,
+                didDataChange: true,
+                initialScrollAtEnd: true,
+                previousDataLength,
+                stylePaddingEnd: 0,
+            });
+            doMaintainScrollAtEnd(ctx);
+        };
+
+        try {
+            append();
+            flushFrame();
+            // Fabric measurement can run after the follow frame. A completed bootstrap
+            // must not replace that request with an initial scroll to an earlier batch.
+            evaluateBootstrapInitialScroll(ctx);
+            evaluateBootstrapInitialScroll(ctx);
+            expect(ctx.state.scrollingTo).toMatchObject({ index: 20, isScrollToEnd: true });
+            expect(ctx.state.scrollingTo?.isInitialScroll).not.toBe(true);
+            expect(ctx.state.initialScroll).toBeUndefined();
+
+            for (let batch = 1; batch < 4; batch++) {
+                append();
+                evaluateBootstrapInitialScroll(ctx);
+            }
+            expect(ctx.state.props.data).toHaveLength(30);
+            expect(ctx.state.pendingMaintainScrollAtEnd).toBe(true);
+
+            finishScrollTo(ctx);
+            await Promise.resolve();
+            flushFrame();
+            expect(ctx.state.scrollingTo).toMatchObject({ index: 29, isScrollToEnd: true, targetOffset: 1477 });
+            expect(ctx.state.scrollingTo?.isInitialScroll).not.toBe(true);
+            finishScrollTo(ctx);
+            await Promise.resolve();
+            expect(ctx.state.pendingMaintainScrollAtEnd).toBe(false);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
     });
 
     it("still clears a finished bottom-aligned initialScrollIndex target when data changes", () => {

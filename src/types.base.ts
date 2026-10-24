@@ -252,6 +252,9 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
     /**
      * If true, auto-scrolls to end when new items are added.
      * Use an options object to opt into specific triggers and control whether that scroll is animated.
+     * Setting false pauses maintenance while retaining end-follow intent. Re-enabling resumes
+     * that intent even if content grew beyond the threshold; user or list navigation releases it.
+     * While paused, isFollowingEnd reports the retained intent.
      * With a native screen reader enabled, unowned accessibility scrolls toward the start
      * release following. Assistive-tech scrolls during library animations are not detected.
      * @default false
@@ -266,11 +269,13 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
 
     /**
      * Maintains visibility of content.
-     * - scroll (default: true) stabilizes during size/layout changes while scrolling.
-     * - data (default: false) stabilizes when the data array changes; passing true also sets the RN maintainVisibleContentPosition prop.
+     * - size (default: true) stabilizes during size/layout changes while scrolling.
+     * - data (default: false) stabilizes when the data array changes.
      * - shouldRestorePosition can opt out specific items from data-change anchoring.
      * - undefined (default) enables scroll stabilization but skips data-change anchoring.
-     * - true enables both behaviors; false disables both.
+     * - true enables both JS behaviors; false disables both.
+     * Native iOS maintainVisibleContentPosition is enabled when either size or data stabilization is enabled,
+     * and disabled when both are disabled.
      */
     maintainVisibleContentPosition?: boolean | MaintainVisibleContentPositionConfig<ItemT>;
 
@@ -387,11 +392,12 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
      * content/viewport size is inferred as accessibility input (including focus navigation),
      * once per burst; motion toward the start releases end following. Library animations
      * and controller/native-ref command windows mask assistive-tech scrolling.
-     * Native commands bypassing the list and its refs (e.g. Reanimated worklets) can also
-     * count as accessibility input. Layout/clamp/MVCP events and commands through the
-     * list or its refs do not emit it.
+     * Native commands bypassing the list and its refs (e.g. Reanimated scrollTo worklets)
+     * cannot be distinguished from accessibility input while a screen reader is on; call
+     * cancelScroll() on the JS thread before that navigation to release end following.
+     * Layout/clamp/MVCP events and commands through the list or its refs do not emit it.
      * @experimental Native pointer/wheel-only input without a screen reader is not detected.
-     * Web scrollbar detection requires pointer events on the scroller.
+     * Web scrollbar detection requires pointer events in a measurable, non-overlay gutter.
      */
     onUserScroll?: () => void;
 
@@ -523,8 +529,10 @@ export interface ScrollToEndOptions {
 }
 
 /**
- * Resolved value of imperative scroll promises. Undefined means the list landed on the target;
- * a reason means it was interrupted by user input, superseded by cancellation/replacement,
+ * Resolved value of imperative scroll promises. Undefined means the list landed on the target.
+ * scrollToIndex and scrollToOffset clamp out-of-range targets to reachable indexes/offsets and
+ * resolve as landed. Index-based navigation and scrollToEnd on empty data resolve as unreachable.
+ * A reason means it was interrupted by user input, superseded by cancellation/replacement,
  * or unreachable because the target cannot be reached, the data was replaced, or the list unmounted.
  * The void member keeps existing `Promise<void>` implementations assignable.
  */
@@ -566,8 +574,9 @@ export interface AlwaysRenderConfig {
 }
 
 export interface MaintainScrollAtEndOnOptions {
-    /** "append" follows only additions that preserve every existing item key in order. */
-    dataChange?: boolean | "append";
+    /** Follow only additions that preserve every existing item key in order. */
+    dataAppend?: boolean;
+    dataChange?: boolean;
     footerLayout?: boolean;
     itemLayout?: boolean;
     layout?: boolean;
@@ -641,10 +650,17 @@ export type LegendListState = {
     isWithinMaintainScrollAtEndThreshold: boolean;
     getAverageItemSizes: () => Record<string, LegendListAverageItemSize>;
     indexByKey: (key: string) => number | undefined;
-    listen: <T extends LegendListListenerType>(
-        listenerType: T,
-        callback: (value: ListenerTypeValueMap[T]) => void,
-    ) => () => void;
+    listen: {
+        // Keep legacy implementations assignable while inferring values for every listener key.
+        <T extends Exclude<LegendListListenerType, "isFollowingEnd" | "distanceFromEnd">>(
+            listenerType: T,
+            callback: (value: Pick<ListenerTypeValueMap, LegendListListenerType>[T]) => void,
+        ): () => void;
+        <T extends LegendListListenerType>(
+            listenerType: T,
+            callback: (value: Pick<ListenerTypeValueMap, LegendListListenerType>[T]) => void,
+        ): () => void;
+    };
     listenToPosition: (key: string, callback: (value: number) => void) => () => void;
     positionAtIndex: (index: number) => number;
     positionByKey: (key: string) => number | undefined;
@@ -684,12 +700,14 @@ export type LegendListRef = {
     flashScrollIndicators(): void;
 
     /**
-     * Returns the native ScrollView component reference.
+     * Returns a stable wrapper around the native ScrollView reference.
+     * Scroll commands release end following; wrapper identity differs from the native instance.
      */
     getNativeScrollRef(): any;
 
     /**
-     * Returns the underlying animatable scroll component reference.
+     * Returns a stable wrapper around the animatable scroll component reference.
+     * Scroll commands release end following; wrapper identity differs from the native instance.
      */
     getAnimatableRef(): any;
 
@@ -699,7 +717,8 @@ export type LegendListRef = {
     getScrollableNode(): any;
 
     /**
-     * Returns the ScrollResponderMixin for advanced scroll handling.
+     * Returns a stable wrapper around the ScrollResponderMixin for advanced scroll handling.
+     * Scroll commands release end following; wrapper identity differs from the native instance.
      */
     getScrollResponder(): any;
 

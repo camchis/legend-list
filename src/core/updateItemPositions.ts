@@ -53,6 +53,7 @@ export function updateItemPositions(
     } = state;
     const previousTargetIndex = scrollingTo?.index;
     const dataLength = data!.length;
+    if (scrollingTo?.isScrollToEnd) scrollingTo.index = dataLength - 1;
     const numColumns = peek$(ctx, "numColumns") ?? 1;
     const hasColumns = numColumns > 1;
     // Range expansion does not change single-column positions. Reuse a completed
@@ -103,6 +104,8 @@ export function updateItemPositions(
     let currentRowTop = 0;
     let column = 1;
     let maxSizeInRow = 0;
+    // An empty render range uses -1 until the first items are allocated.
+    startIndex = Math.max(0, startIndex);
 
     if (dataChanged) {
         columnSpans.length = 0;
@@ -215,7 +218,7 @@ export function updateItemPositions(
         // Update indexByKey if needed
         if (needsIndexByKey) {
             indexByKey.set(id, i);
-            if (scrollingTo?.key === id) scrollingTo.index = i;
+            if (scrollingTo?.key !== undefined && scrollingTo.key === id) scrollingTo.index = i;
         }
 
         // Single-column fast path: skip column/span writes and row fit checks
@@ -252,7 +255,8 @@ export function updateItemPositions(
 
     const targetRemoved =
         scrollingTo &&
-        ((scrollingTo.key !== undefined && !indexByKey.has(scrollingTo.key)) ||
+        ((scrollingTo.isScrollToEnd && dataLength === 0) ||
+            (scrollingTo.key !== undefined && !indexByKey.has(scrollingTo.key)) ||
             (!scrollingTo.isInitialScroll &&
                 !scrollingTo.isScrollToEnd &&
                 scrollingTo.index !== undefined &&
@@ -261,13 +265,20 @@ export function updateItemPositions(
         // An older target can disappear while a newer request waits for layout.
         if (ctx.scrollRequestTracker?.isWaitingToRun()) finishScrollTo(ctx);
         else cancelScroll(ctx, true, "unreachable");
-    } else if (scrollingTo?.key !== undefined && scrollingTo.index !== previousTargetIndex) {
-        const index = scrollingTo.index!;
-        scrollTo(ctx, {
-            ...scrollingTo,
-            itemSize: getItemSizeAtIndex(ctx, index),
-            offset: calculateOffsetForIndex(ctx, index),
-        });
+    } else if (
+        scrollingTo &&
+        (scrollingTo.isScrollToEnd || scrollingTo.key !== undefined) &&
+        scrollingTo.index !== previousTargetIndex
+    ) {
+        state.scheduledWork.microtask(() => {
+            if (state.scrollingTo !== scrollingTo) return;
+            const index = scrollingTo.index!;
+            scrollTo(ctx, {
+                ...scrollingTo,
+                itemSize: getItemSizeAtIndex(ctx, index),
+                offset: calculateOffsetForIndex(ctx, index),
+            });
+        }, "scrollTargetRetarget");
     }
 
     if (snapToIndices) {

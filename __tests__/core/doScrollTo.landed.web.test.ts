@@ -3,7 +3,9 @@ import "../setup";
 
 import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import { scrollToEnd } from "@/core/scrollToEnd";
+import { updateItemPositions } from "@/core/updateItemPositions";
 import { Platform } from "@/platform/Platform";
+import { normalizeMaintainVisibleContentPosition } from "@/utils/normalizeMaintainVisibleContentPosition";
 import {
     createWebScrollHarness,
     flushMicrotasks,
@@ -35,18 +37,13 @@ function stepUntil(h: WebScrollHarness, offset: number) {
     }
 }
 
-/** Offset that puts `index` at `viewPosition` within the viewport, clamped to the content. */
-function alignedOffset(h: WebScrollHarness, index: number, viewPosition = 0) {
+/** Offset that aligns the item's end with the viewport, clamped to the content. */
+function endAlignedOffset(h: WebScrollHarness, index: number) {
     const size = h.state.sizes.get(`item_${index}`)!;
-    return h.targetOffsetForIndex(index) === 0 && viewPosition === 0
-        ? 0
-        : Math.max(
-              0,
-              Math.min(
-                  h.state.positions[index]! - viewPosition * (h.state.scrollLength - size),
-                  h.ctx.state.totalSize - h.state.scrollLength,
-              ),
-          );
+    return Math.max(
+        0,
+        Math.min(h.state.positions[index]! - (h.state.scrollLength - size), h.state.totalSize - h.state.scrollLength),
+    );
 }
 
 beforeEach(() => {
@@ -59,6 +56,165 @@ afterEach(() => {
 });
 
 describe("animated web scrolls resolve only once landed", () => {
+    for (const mvcp of [false, { size: false }] as const) {
+        it(`verifies an instant index target after measurement with MVCP ${JSON.stringify(mvcp)}`, async () => {
+            const h = setup();
+            h.state.props.maintainVisibleContentPosition = normalizeMaintainVisibleContentPosition(mvcp);
+            const result = trackScroll(h.ref.scrollToIndex({ animated: false, index: 50 }));
+            await flushMicrotasks();
+            h.measure({ 45: 400, 46: 400, 47: 400, 48: 400, 49: 400 });
+            await runUntilResolved(h, result);
+            expect(result.resolved).toBe(true);
+            expect(result.value).toBeUndefined();
+            expect(h.browser.offset).toBe(h.state.positions[50]!);
+            expect(h.browser.offset).toBe(6500);
+        });
+    }
+
+    describe("measured DOM targets", () => {
+        function elementAt(h: WebScrollHarness, index: number) {
+            h.state.refScroller.current!.getScrollableNode = () =>
+                ({
+                    clientHeight: 500,
+                    clientLeft: 0,
+                    clientTop: 0,
+                    clientWidth: 400,
+                    getBoundingClientRect: () => ({ bottom: 500, left: 0, top: 0 }),
+                }) as any;
+            return {
+                getBoundingClientRect: () => {
+                    const top = h.state.positions[index]! - h.browser.offset;
+                    return { bottom: top + 20, height: 20, top };
+                },
+                isConnected: true,
+            } as any;
+        }
+
+        for (const windowOwner of [false, true]) {
+            it.each(["ltr", "rtl"])(`reveals RTL rows (%s, window=${windowOwner})`, async (direction) => {
+                const rtlOwner = direction === "rtl";
+                const h = setup({
+                    horizontal: true,
+                    horizontalRTLScrollType: rtlOwner ? "negative" : "normal",
+                    rtl: true,
+                });
+                const originalStyle = globalThis.getComputedStyle;
+                const originalWindow = globalThis.window;
+                const owner = {
+                    clientLeft: 0,
+                    clientTop: 0,
+                    clientWidth: 500,
+                    getBoundingClientRect: () => ({ left: 0, right: 500, top: 0 }),
+                };
+                globalThis.getComputedStyle = (() => ({ direction })) as typeof getComputedStyle;
+                if (windowOwner)
+                    globalThis.window = { innerHeight: 400, innerWidth: 500 } as Window & typeof globalThis;
+                h.state.refScroller.current!.getScrollableNode = () => owner as any;
+                h.state.refScroller.current!.isWindowScroll = () => windowOwner;
+                const element = {
+                    getBoundingClientRect: () => ({
+                        left: rtlOwner ? 500 - 2100 + h.browser.offset : 2000 - h.browser.offset,
+                        right: rtlOwner ? 500 - 2000 + h.browser.offset : 2100 - h.browser.offset,
+                        width: 100,
+                    }),
+                    isConnected: true,
+                };
+                try {
+                    const scroll = trackScroll((h.ref as any).scrollElementIntoView({ animated: false, element }));
+                    await runUntilResolved(h, scroll);
+                    expect(scroll.resolved).toBe(true);
+                    expect(scroll.value).toBeUndefined();
+                    expect(element.getBoundingClientRect().left).toBeGreaterThanOrEqual(0);
+                    expect(element.getBoundingClientRect().right).toBeLessThanOrEqual(500);
+                    expect(h.browser.offset).toBe(1600);
+                } finally {
+                    globalThis.getComputedStyle = originalStyle;
+                    globalThis.window = originalWindow;
+                }
+            });
+        }
+
+        for (const direction of ["vertical", "horizontal", "horizontal RTL"]) {
+            for (const edge of ["start", "end"]) {
+                it(`reveals a target covered by the ${edge} border (${direction})`, async () => {
+                    const horizontal = direction !== "vertical";
+                    const rtl = direction === "horizontal RTL";
+                    const h = setup({
+                        horizontal,
+                        horizontalRTLScrollType: rtl ? "negative" : undefined,
+                        rtl,
+                        scrollLength: 380,
+                    });
+                    h.browser.moveTo(1000);
+                    h.state.refScroller.current!.getScrollableNode = () =>
+                        ({
+                            clientHeight: 380,
+                            clientLeft: 20,
+                            clientTop: 20,
+                            clientWidth: 380,
+                            getBoundingClientRect: () => ({ bottom: 428, left: 8, right: 428, top: 8 }),
+                        }) as any;
+                    const element = {
+                        getBoundingClientRect: () => {
+                            const start =
+                                (edge === "start" ? 8 : 410) + (horizontal && rtl ? 1 : -1) * (h.browser.offset - 1000);
+                            return {
+                                bottom: horizontal ? 46 : start + 18,
+                                height: 18,
+                                left: horizontal ? start : 28,
+                                right: horizontal ? start + 18 : 46,
+                                top: horizontal ? 28 : start,
+                                width: 18,
+                            };
+                        },
+                        isConnected: true,
+                    };
+                    const scroll = trackScroll((h.ref as any).scrollElementIntoView({ animated: false, element }));
+                    await runUntilResolved(h, scroll);
+                    expect(scroll.resolved).toBe(true);
+                    expect(scroll.value).toBeUndefined();
+                    const rect = element.getBoundingClientRect();
+                    expect(horizontal ? rect.left : rect.top).toBeGreaterThanOrEqual(28);
+                    expect(horizontal ? rect.right : rect.bottom).toBeLessThanOrEqual(408);
+                    expect(h.scrollToCalls).toHaveLength(1);
+                });
+            }
+        }
+
+        it("retargets an animated DOM reveal when preceding rows shrink", async () => {
+            const h = setup();
+            const element = elementAt(h, 50);
+            const scroll = trackScroll((h.ref as any).scrollElementIntoView({ animated: true, element }));
+            expect(h.browser.destination).toBe(4520);
+            h.browser.step(1000);
+            h.measure(Object.fromEntries(Array.from({ length: 10 }, (_, i) => [20 + i, 0])));
+            await runUntilResolved(h, scroll);
+            expect(scroll.resolved).toBe(true);
+            expect(scroll.value).toBeUndefined();
+            expect(element.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+            expect(element.getBoundingClientRect().bottom).toBeLessThanOrEqual(500);
+            expect(h.browser.destination).toBeUndefined();
+        });
+
+        for (const animated of [false, true]) {
+            it(`reports unreachable when mandatory snapping prevents centered DOM alignment (animated: ${animated})`, async () => {
+                const h = setup();
+                const element = elementAt(h, 50);
+                const scroller = h.state.refScroller.current!;
+                const originalScrollTo = scroller.scrollTo;
+                scroller.scrollTo = (options) =>
+                    originalScrollTo({ ...options, y: Math.round(options.y! / 1000) * 1000 });
+                const scroll = trackScroll(
+                    (h.ref as any).scrollElementIntoView({ animated, element, viewPosition: 0.5 }),
+                );
+                await runUntilResolved(h, scroll);
+                expect(scroll.resolved).toBe(true);
+                expect(scroll.value).toEqual({ reason: "unreachable" });
+                expect(element.getBoundingClientRect().top).not.toBe(240);
+            });
+        }
+    });
+
     describe("late measurement", () => {
         it("does not resolve while passing a recomputed target on the way to the issued destination", async () => {
             const h = setup();
@@ -205,12 +361,12 @@ describe("animated web scrolls resolve only once landed", () => {
         it("tracks a variable-height target that measures late with viewPosition 1", async () => {
             const h = setup({ itemSize: (index) => 50 + (index % 5) * 30 });
             const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 40, viewPosition: 1 }));
-            const initialTarget = alignedOffset(h, 40, 1);
+            const initialTarget = endAlignedOffset(h, 40);
             expect(h.browser.destination).toBe(initialTarget);
 
             h.browser.step(600);
             h.measure({ 12: 400, 40: 320 });
-            const landed = alignedOffset(h, 40, 1);
+            const landed = endAlignedOffset(h, 40);
             expect(landed).not.toBe(initialTarget);
 
             await runUntilResolved(h, scroll);
@@ -286,6 +442,37 @@ describe("animated web scrolls resolve only once landed", () => {
             expect(scroll.value).toBeUndefined();
             expect(h.browser.offset).toBe(12000);
         });
+    });
+
+    it("retries an instant request when DOM content catches up before verification", async () => {
+        const h = setup();
+        const scroller = h.state.refScroller.current!;
+        const originalScrollTo = scroller.scrollTo;
+        scroller.scrollTo = (options) => {
+            originalScrollTo({ ...options, y: Math.min(options.y!, 3000) });
+            scroller.scrollTo = originalScrollTo;
+        };
+        const scroll = trackScroll(h.ref.scrollToOffset({ animated: false, offset: 5000 }));
+        expect(h.browser.offset).toBe(3000);
+
+        await runUntilResolved(h, scroll);
+        expect(scroll.resolved).toBe(true);
+        expect(scroll.value).toBeUndefined();
+        expect(h.browser.offset).toBe(5000);
+        expect(h.scrollToCalls).toHaveLength(2);
+        expect(h.scrollToCalls[1]).toEqual({ animated: false, y: 5000 });
+    });
+
+    it("reports unreachable for a first instant request rejected by mandatory snapping", async () => {
+        const h = setup();
+        const scroller = h.state.refScroller.current!;
+        const originalScrollTo = scroller.scrollTo;
+        scroller.scrollTo = (options) => originalScrollTo({ ...options, y: Math.round(options.y! / 1000) * 1000 });
+        const scroll = trackScroll(h.ref.scrollToOffset({ animated: false, offset: 1050 }));
+        await runUntilResolved(h, scroll);
+        expect(scroll.resolved).toBe(true);
+        expect(scroll.value).toEqual({ reason: "unreachable" });
+        expect(h.browser.offset).toBe(1000);
     });
 
     describe("settling short of the target", () => {
@@ -490,6 +677,20 @@ describe("animated web scrolls resolve only once landed", () => {
     });
 
     describe("data changes during the scroll", () => {
+        it("reports an active end target as unreachable when its data becomes empty", async () => {
+            const h = setup();
+            const scroll = trackScroll(h.ref.scrollToEnd({ animated: true }));
+            h.browser.step(400);
+            h.setData(0);
+            updateItemPositions(h.ctx, true);
+
+            await runUntilResolved(h, scroll);
+
+            expect(scroll.resolved).toBe(true);
+            expect(scroll.value).toEqual({ reason: "unreachable" });
+            expect(h.state.scrollingTo).toBeUndefined();
+        });
+
         it("retries against the clamped index and preserves alignment after data shrinks", async () => {
             const h = setup();
             const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50, viewOffset: 600 }));

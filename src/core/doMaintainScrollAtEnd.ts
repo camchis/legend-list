@@ -1,6 +1,7 @@
 import { USER_MOMENTUM_STALL_TIMEOUT_MS } from "@/constants";
 import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
+import { emitMetrics } from "@/core/emitMetrics";
 import { isEndOfContentTarget } from "@/core/endOfContentTarget";
 import { getScrollRequestTracker } from "@/core/scrollRequestTracker";
 import { getAlignItemsAtEndPadding } from "@/core/updateContentMetricsState";
@@ -32,6 +33,7 @@ export function interruptMaintainScrollAtEnd(
     if (maintaining || state.pendingMaintainScrollAtEnd) {
         finishMaintainScrollAtEnd(ctx);
     }
+    emitMetrics(ctx);
     return cancelActiveScroll;
 }
 
@@ -44,24 +46,25 @@ export function armAppScrollRearm(ctx: StateContext) {
     );
 }
 
-// Once no reader anchor or scroll owns the position, settling within the threshold re-arms following.
+// A release baseline owns gesture deferral; momentum without one rearms from geometry.
 export function rearmEndFollowIfSettled(ctx: StateContext) {
     const { state } = ctx;
     if (
         state.endFollowInterrupted &&
-        !state.visibleContentAnchor &&
+        (!state.visibleContentAnchor || state.visibleContentAnchor.sizeOnly) &&
         !state.isDragging &&
-        !state.isMomentumScrolling &&
-        !state.scheduledWork.has("endFollowRearm") &&
+        state.userScrollContentSize === undefined &&
         !state.scheduledWork.has("appScrollRearm") &&
         !state.scrollingTo &&
         !state.pendingScrollResolve &&
-        !ctx.scrollRequestTracker?.isWaitingToRun() &&
         peek$(ctx, "isWithinMaintainScrollAtEndThreshold")
     ) {
         state.endFollowInterrupted = false;
         // Retain settled intent if the next content measurement moves the end beyond the threshold.
-        if (state.props.maintainScrollAtEnd) set$(ctx, "isFollowingEnd", true);
+        if (state.props.maintainScrollAtEnd) {
+            set$(ctx, "isFollowingEnd", true);
+            emitMetrics(ctx);
+        }
     }
 }
 
@@ -71,6 +74,10 @@ export function finishMaintainScrollAtEnd(ctx: StateContext) {
     const nextPadding = getAlignItemsAtEndPadding(ctx);
     state.maintainingScrollAtEnd = undefined;
     state.pendingMaintainScrollAtEnd = false;
+    // Only rendered rows can still deliver a late measurement for this follow.
+    for (const key of state.pendingEndMeasurements ?? []) {
+        if (!state.containerItemKeys.has(key)) state.pendingEndMeasurements!.delete(key);
+    }
     if (currentPadding !== nextPadding) {
         set$(ctx, "alignItemsAtEndPadding", nextPadding);
         state.scrollForNextCalculateItemsInView = undefined;
@@ -85,193 +92,185 @@ export function finishMaintainScrollAtEnd(ctx: StateContext) {
 
 export function doMaintainScrollAtEnd(ctx: StateContext, options?: { immediate?: boolean }) {
     const state = ctx.state;
-    let didMaintain = false;
+    if (state.isUnmounted) return false;
     // Measurements can arrive after drag start canceled the previous follow.
     // Suspend following during a drag or while a shared owner is scrolled outside this list.
     if (
         state.isDragging ||
-        (state.releasedFromUserDrag && (state.isMomentumScrolling || state.scheduledWork.has("endFollowRearm"))) ||
+        state.userScrollContentSize !== undefined ||
         state.refScroller.current?.isScrollInRange?.() === false
     ) {
-        if (state.releasedFromUserDrag) state.didDeferMaintainScrollAtEndForMomentum = true;
         finishMaintainScrollAtEnd(ctx);
-    } else {
-        const {
-            didContainersLayout,
-            didFinishInitialScroll,
-            pendingNativeMVCPAdjust,
-            props: { maintainScrollAtEnd },
-        } = state;
+        return false;
+    }
+    const {
+        didContainersLayout,
+        didFinishInitialScroll,
+        pendingNativeMVCPAdjust,
+        props: { maintainScrollAtEnd },
+    } = state;
+    const initialEndScrollOwnsViewport =
+        state.scrollingTo?.isInitialScroll ||
+        (Platform.OS === "web" &&
+            !didFinishInitialScroll &&
+            !state.scrollingTo &&
+            didContainersLayout &&
+            state.initialScrollSession?.kind === "bootstrap" &&
+            !state.initialScrollSession.bootstrap &&
+            state.initialScrollSession.completion);
+    if (
+        initialEndScrollOwnsViewport &&
+        maintainScrollAtEnd &&
+        !state.endFollowInterrupted &&
+        !ctx.scrollRequestTracker?.isWaitingToRun() &&
+        isEndOfContentTarget(state.initialScroll, state.props.data.length)
+    ) {
+        state.pendingMaintainScrollAtEnd = true;
+        return false;
+    }
+    // ResizeObserver runs after DOM layout and before paint. Instant web
+    // layout following can commit now; data changes still wait for RAF.
+    const immediate = options?.immediate && Platform.OS === "web" && !maintainScrollAtEnd?.animated;
+    const isWithinMaintainScrollAtEndThreshold = peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
+    const isReplayingPendingMaintain = !!state.pendingMaintainScrollAtEnd;
+    // A waiting request owns the next target, even if scrollingTo still describes an older end scroll.
+    // A waiting scrollToEnd will calculate the latest end when it runs; only active end targets need replay.
+    const shouldMaintainScrollAtEnd = !!(
+        !ctx.scrollRequestTracker?.isWaitingToRun() &&
+        (!state.scrollingTo || state.scrollingTo.isScrollToEnd) &&
+        !state.endFollowInterrupted &&
+        (peek$(ctx, "isFollowingEnd") ||
+            isWithinMaintainScrollAtEndThreshold ||
+            isReplayingPendingMaintain ||
+            state.scrollingTo?.isScrollToEnd) &&
+        maintainScrollAtEnd &&
+        didFinishInitialScroll
+    );
+
+    if (!shouldMaintainScrollAtEnd) {
+        if (pendingNativeMVCPAdjust) state.pendingMaintainScrollAtEnd = false;
+        else finishMaintainScrollAtEnd(ctx);
+        return false;
+    }
+    set$(ctx, "isFollowingEnd", true);
+
+    if (!state.scrollingTo) {
+        const scroller = state.refScroller.current;
+        const nativeMax = scroller?.getMaxScrollOffset?.();
+        const observed = scroller?.getCurrentScrollOffset?.();
+        // Removing a footer can clamp the DOM before its ResizeObserver fires.
+        // Account for that layout movement now; its delayed scroll event must
+        // not look like the reader scrolled upward and cancel the queued follow.
         if (
-            Platform.OS === "web" &&
-            (!didFinishInitialScroll || state.scrollingTo?.isInitialScroll) &&
-            maintainScrollAtEnd &&
-            !state.endFollowInterrupted &&
-            !ctx.scrollRequestTracker?.isWaitingToRun() &&
-            (!state.scrollingTo || state.scrollingTo.isInitialScroll) &&
-            (state.scrollingTo?.isInitialScroll ||
-                (didContainersLayout &&
-                    state.initialScrollSession?.kind === "bootstrap" &&
-                    !state.initialScrollSession.bootstrap &&
-                    state.initialScrollSession.completion)) &&
-            isEndOfContentTarget(state.initialScroll, state.props.data.length)
+            nativeMax !== undefined &&
+            observed !== undefined &&
+            nativeMax < state.scroll - 1 &&
+            Math.abs(observed - nativeMax) <= 1
         ) {
             state.pendingMaintainScrollAtEnd = true;
-            return false;
-        }
-        // ResizeObserver runs after DOM layout and before paint. Instant web
-        // layout following can commit now; data changes still wait for RAF.
-        const immediate = options?.immediate && Platform.OS === "web" && !maintainScrollAtEnd?.animated;
-        const isWithinMaintainScrollAtEndThreshold = peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
-        const isReplayingPendingMaintain = !!state.pendingMaintainScrollAtEnd;
-        // A waiting request owns the next target, even if scrollingTo still describes an older end scroll.
-        // A waiting scrollToEnd will calculate the latest end when it runs; only active end targets need replay.
-        const shouldMaintainScrollAtEnd = !!(
-            !ctx.scrollRequestTracker?.isWaitingToRun() &&
-            (!state.scrollingTo || state.scrollingTo.isScrollToEnd) &&
-            !state.endFollowInterrupted &&
-            (peek$(ctx, "isFollowingEnd") ||
-                isWithinMaintainScrollAtEndThreshold ||
-                isReplayingPendingMaintain ||
-                state.scrollingTo?.isScrollToEnd) &&
-            maintainScrollAtEnd &&
-            didFinishInitialScroll
-        );
-
-        if (shouldMaintainScrollAtEnd) {
-            set$(ctx, "isFollowingEnd", true);
-        }
-
-        if (shouldMaintainScrollAtEnd && !state.scrollingTo) {
-            const scroller = state.refScroller.current;
-            const nativeMax = scroller?.getMaxScrollOffset?.();
-            const observed = scroller?.getCurrentScrollOffset?.();
-            // Removing a footer can clamp the DOM before its ResizeObserver fires.
-            // Account for that layout movement now; its delayed scroll event must
-            // not look like the reader scrolled upward and cancel the queued follow.
-            if (
-                nativeMax !== undefined &&
-                observed !== undefined &&
-                nativeMax < state.scroll - 1 &&
-                Math.abs(observed - nativeMax) <= 1
-            ) {
-                state.pendingMaintainScrollAtEnd = true;
-                state.scrollPending = observed;
-                updateScroll(ctx, observed, true, { markHasScrolled: false });
-            }
-        }
-
-        const anchorIndex = state.props.anchoredEndSpace?.anchorIndex;
-        const dataLength = state.props.data.length;
-        if (
-            shouldMaintainScrollAtEnd &&
-            (!didContainersLayout ||
-                state.activeSizeAnimations?.size ||
-                // Wait for the anchored tail to be measured.
-                (anchorIndex !== undefined &&
-                    anchorIndex >= 0 &&
-                    anchorIndex < dataLength &&
-                    !areKnownOrFixedItemSizesAvailable(ctx, anchorIndex, dataLength - 1)))
-        ) {
-            state.pendingMaintainScrollAtEnd = true;
-        } else if (pendingNativeMVCPAdjust) {
-            // Native MVCP can still be finishing its own clamp after data changes. Defer the end-anchor scroll
-            // until that settles so maintainScrollAtEnd does not fight the platform's pending adjustment.
-            state.pendingMaintainScrollAtEnd = shouldMaintainScrollAtEnd;
-        } else if (shouldMaintainScrollAtEnd && (state.scrollingTo || state.pendingScrollResolve)) {
-            // A content change during scrollToEnd belongs to the same end-follow intent.
-            // Wait for the active request instead of letting runNowIfIdle discard it.
-            if (immediate && state.scrollingTo?.isScrollToEnd && !state.scrollingTo.animated) {
-                // Retarget the same end request without replacing its promise.
-                state.pendingMaintainScrollAtEnd = false;
-                ctx.scrollToEnd!({ animated: false });
-                didMaintain = true;
-            } else {
-                state.pendingMaintainScrollAtEnd = true;
-            }
-        } else if (shouldMaintainScrollAtEnd && didContainersLayout) {
-            // Run this only if scroll is at the bottom and after initial layout
-            state.pendingMaintainScrollAtEnd = false;
-            // Set scroll to the bottom of the list so that checkAtTop/checkAtBottom is correct
-            const contentSize = getContentSize(ctx);
-            if (contentSize < state.scrollLength) {
-                // If content fits within the viewport, we should be at scroll 0.
-                state.scroll = 0;
-            }
-
-            if (
-                !state.maintainingScrollAtEnd ||
-                (immediate &&
-                    (state.maintainingScrollAtEnd === "pending-instant" || state.maintainingScrollAtEnd === "instant"))
-            ) {
-                const pendingState = maintainScrollAtEnd.animated ? "pending-animated" : "pending-instant";
-                const activeState = maintainScrollAtEnd.animated ? "animated" : "instant";
-                const scrollAtRequest = state.scroll;
-                state.maintainingScrollAtEnd = pendingState;
-                const run = () => {
-                    if (state.maintainingScrollAtEnd === pendingState) {
-                        if (state.activeSizeAnimations?.size) {
-                            state.pendingMaintainScrollAtEnd = true;
-                            state.maintainingScrollAtEnd = undefined;
-                        } else if (
-                            state.isDragging ||
-                            (state.releasedFromUserDrag &&
-                                (state.isMomentumScrolling || state.scheduledWork.has("endFollowRearm"))) ||
-                            state.refScroller.current?.isScrollInRange?.() === false
-                        ) {
-                            if (state.releasedFromUserDrag) state.didDeferMaintainScrollAtEndForMomentum = true;
-                            finishMaintainScrollAtEnd(ctx);
-                        } else {
-                            const isStillWithinThreshold = peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
-                            const didScrollSinceRequest = Platform.OS === "web" && state.scroll !== scrollAtRequest;
-                            // Layout and content changes can move the end beyond the threshold while this request is pending.
-                            // Native layout can also move the offset; its drag handler cancels actual user input.
-                            // On web, retain offset-based cancellation for scrollbar and keyboard scrolling.
-                            if (isReplayingPendingMaintain || isStillWithinThreshold || !didScrollSinceRequest) {
-                                if (state.scrollingTo || state.pendingScrollResolve) {
-                                    state.pendingMaintainScrollAtEnd = true;
-                                    state.maintainingScrollAtEnd = undefined;
-                                } else {
-                                    state.maintainingScrollAtEnd = activeState;
-                                    const scrollPromise = getScrollRequestTracker(ctx).runNowIfIdle(() =>
-                                        ctx.scrollToEnd!({ animated: maintainScrollAtEnd.animated }),
-                                    );
-
-                                    void scrollPromise.then(() => {
-                                        if (
-                                            state.maintainingScrollAtEnd === activeState &&
-                                            !state.scrollingTo &&
-                                            !state.pendingScrollResolve
-                                        ) {
-                                            if (state.pendingMaintainScrollAtEnd) {
-                                                state.maintainingScrollAtEnd = undefined;
-                                                doMaintainScrollAtEnd(ctx);
-                                            } else {
-                                                finishMaintainScrollAtEnd(ctx);
-                                            }
-                                        }
-                                    });
-                                }
-                            } else if (state.maintainingScrollAtEnd === pendingState) {
-                                finishMaintainScrollAtEnd(ctx);
-                            }
-                        }
-                    }
-                };
-                if (immediate) {
-                    run();
-                } else {
-                    requestAnimationFrame(run);
-                }
-            } else {
-                // Coalesce follow-up requests while the current maintain pass is still settling.
-                state.pendingMaintainScrollAtEnd = true;
-            }
-
-            didMaintain = true;
-        } else {
-            finishMaintainScrollAtEnd(ctx);
+            state.scrollPending = observed;
+            updateScroll(ctx, observed, true, { markHasScrolled: false });
         }
     }
-    return didMaintain;
+
+    const anchorIndex = state.props.anchoredEndSpace?.anchorIndex;
+    const dataLength = state.props.data.length;
+    if (
+        !didContainersLayout ||
+        state.activeSizeAnimations?.size ||
+        // Wait for the anchored tail to be measured.
+        (anchorIndex !== undefined &&
+            anchorIndex >= 0 &&
+            anchorIndex < dataLength &&
+            !areKnownOrFixedItemSizesAvailable(ctx, anchorIndex, dataLength - 1)) ||
+        // Native MVCP must finish its clamp before end following takes ownership.
+        pendingNativeMVCPAdjust
+    ) {
+        state.pendingMaintainScrollAtEnd = true;
+        return false;
+    }
+    if (state.scrollingTo || state.pendingScrollResolve) {
+        // A content change during scrollToEnd belongs to the same end-follow intent.
+        // Wait for the active request instead of letting runNowIfIdle discard it.
+        if (immediate && state.scrollingTo?.isScrollToEnd && !state.scrollingTo.animated) {
+            // Retarget the same end request without replacing its promise.
+            state.pendingMaintainScrollAtEnd = false;
+            ctx.scrollToEnd!({ animated: false });
+            return true;
+        }
+        state.pendingMaintainScrollAtEnd = true;
+        return false;
+    }
+
+    state.pendingMaintainScrollAtEnd = false;
+    // Set scroll to the bottom of the list so that checkAtTop/checkAtBottom is correct
+    const contentSize = getContentSize(ctx);
+    if (contentSize < state.scrollLength) {
+        // If content fits within the viewport, we should be at scroll 0.
+        state.scroll = 0;
+    }
+
+    if (
+        !state.maintainingScrollAtEnd ||
+        (immediate &&
+            (state.maintainingScrollAtEnd === "pending-instant" || state.maintainingScrollAtEnd === "instant"))
+    ) {
+        const pendingState = maintainScrollAtEnd.animated ? "pending-animated" : "pending-instant";
+        const activeState = maintainScrollAtEnd.animated ? "animated" : "instant";
+        const scrollAtRequest = state.scroll;
+        state.maintainingScrollAtEnd = pendingState;
+        const run = () => {
+            if (state.maintainingScrollAtEnd !== pendingState) return;
+            if (state.activeSizeAnimations?.size) {
+                state.pendingMaintainScrollAtEnd = true;
+                state.maintainingScrollAtEnd = undefined;
+            } else if (
+                state.isDragging ||
+                state.userScrollContentSize !== undefined ||
+                state.refScroller.current?.isScrollInRange?.() === false ||
+                // Layout may move the end beyond the threshold. Only web offset changes
+                // cancel here; native user input is canceled by its drag handler.
+                (!isReplayingPendingMaintain &&
+                    !peek$(ctx, "isWithinMaintainScrollAtEndThreshold") &&
+                    Platform.OS === "web" &&
+                    state.scroll !== scrollAtRequest)
+            ) {
+                finishMaintainScrollAtEnd(ctx);
+            } else if (state.scrollingTo || state.pendingScrollResolve) {
+                state.pendingMaintainScrollAtEnd = true;
+                state.maintainingScrollAtEnd = undefined;
+            } else {
+                state.maintainingScrollAtEnd = activeState;
+                const scrollPromise = getScrollRequestTracker(ctx).runNowIfIdle(() =>
+                    ctx.scrollToEnd!({ animated: maintainScrollAtEnd.animated }),
+                );
+
+                void scrollPromise.then(() => {
+                    if (
+                        state.maintainingScrollAtEnd === activeState &&
+                        !state.scrollingTo &&
+                        !state.pendingScrollResolve
+                    ) {
+                        if (state.pendingMaintainScrollAtEnd) {
+                            state.maintainingScrollAtEnd = undefined;
+                            doMaintainScrollAtEnd(ctx);
+                        } else {
+                            finishMaintainScrollAtEnd(ctx);
+                        }
+                    }
+                });
+            }
+        };
+        if (immediate) {
+            run();
+        } else {
+            state.scheduledWork.frame(run, "maintainScrollAtEnd");
+        }
+    } else if (state.maintainingScrollAtEnd === "animated" || state.maintainingScrollAtEnd === "instant") {
+        // A queued frame already targets the latest end. Only work arriving
+        // after its command starts needs a follow-up pass.
+        state.pendingMaintainScrollAtEnd = true;
+    }
+
+    return true;
 }

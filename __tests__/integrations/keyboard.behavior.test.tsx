@@ -321,6 +321,32 @@ describe("KeyboardAwareLegendList", () => {
 });
 
 describe("useKeyboardScrollToEnd", () => {
+    for (const closeKeyboard of [false, true]) {
+        it(`scrolls with a scrollToEnd-only adapter (close keyboard: ${closeKeyboard})`, async () => {
+            const { useKeyboardScrollToEnd } = await import("../../src/integrations/keyboard?legacy-end-adapter");
+            const scrollToEnd = mock(() => Promise.resolve());
+            const listRef = { current: { scrollToEnd } };
+            const freeze = createSharedValue(false);
+            let scroll!: ReturnType<typeof useKeyboardScrollToEnd>["scrollMessageToEnd"];
+            function Probe() {
+                scroll = useKeyboardScrollToEnd({ freeze: freeze as any, listRef }).scrollMessageToEnd;
+                return null;
+            }
+            let renderer!: TestRenderer.ReactTestRenderer;
+            act(() => {
+                renderer = TestRenderer.create(<Probe />);
+            });
+            try {
+                await scroll({ animated: true, closeKeyboard });
+                expect(scrollToEnd).toHaveBeenCalledTimes(1);
+                expect(scrollToEnd).toHaveBeenCalledWith({ animated: true });
+                expect(freeze.value).toBe(false);
+            } finally {
+                act(() => renderer.unmount());
+            }
+        });
+    }
+
     it("waits for keyboard dismissal before targeting the end and releases freeze after rejection", async () => {
         const { KeyboardController } = await import("react-native-keyboard-controller");
         const { useKeyboardScrollToEnd } = await import("../../src/integrations/keyboard?dismiss-before-end");

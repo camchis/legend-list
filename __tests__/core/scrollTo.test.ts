@@ -366,6 +366,22 @@ describe("scrollTo", () => {
         expect(mockCtx.state.scrollTargetPinnedRange).toEqual({ end: 11, start: 10 });
     });
 
+    it("pins visible cells when the last cell in the leading row is shorter than the scroll offset", () => {
+        mockCtx.state.props.data = ["tall", "short", "nextTall", "nextShort"];
+        mockCtx.state.positions = [0, 0, 300, 300];
+        mockCtx.state.props.numColumns = 2;
+        mockCtx.values.set("numColumns", 2);
+        mockCtx.state.sizesKnown = new Map([
+            ["item_0", 300],
+            ["item_1", 50],
+            ["item_2", 300],
+            ["item_3", 50],
+        ]);
+        mockCtx.state.scrollLength = 200;
+        scrollTo(mockCtx, { animated: true, offset: 100 });
+        expect(mockCtx.state.scrollTargetPinnedRange).toEqual({ end: 3, start: 0 });
+    });
+
     it("skips offset-only target pinning when known positions do not cover the target offset", () => {
         const triggerCalculateItemsInView = mock(() => undefined);
         mockCtx.state.props.data = Array.from({ length: 10_000 }, (_, index) => ({ id: index }));

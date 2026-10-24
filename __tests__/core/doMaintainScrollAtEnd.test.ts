@@ -281,30 +281,36 @@ describe("doMaintainScrollAtEnd", () => {
             expect(mockRunTrackedScrollToEnd).not.toHaveBeenCalled();
         });
 
-        it.each([false, true])("replays footer growth through initial end correction (finished: %s)", (finished) => {
-            mockState.props.data = [{ id: "tail" }];
-            mockState.didFinishInitialScroll = finished;
-            mockState.initialScroll = {
-                index: 0,
-                preserveForBottomPadding: true,
-                viewOffset: -188,
-                viewPosition: 1,
-            };
-            mockState.scrollingTo = { animated: false, isInitialScroll: true, offset: 700 };
-            mockCtx.values.set("footerSize", 212);
+        for (const platform of ["ios", "android", "web"] as const) {
+            for (const finished of [false, true]) {
+                it(`replays footer growth through initial end correction on ${platform} (finished: ${finished})`, () => {
+                    Platform.OS = platform;
+                    mockState.props.data = [{ id: "tail" }];
+                    mockState.didFinishInitialScroll = finished;
+                    mockState.initialScroll = {
+                        index: 0,
+                        preserveForBottomPadding: true,
+                        viewOffset: -188,
+                        viewPosition: 1,
+                    };
+                    mockState.scrollingTo = { animated: false, isInitialScroll: true, offset: 700 };
+                    mockCtx.values.set("footerSize", 212);
 
-            // Footer layout uses the deferred path while the initial target
-            // still includes the previous dataset's footer height.
-            expect(doMaintainScrollAtEnd(mockCtx)).toBe(false);
-            expect(mockState.pendingMaintainScrollAtEnd).toBe(true);
-            expect(scrollToEndSpy).not.toHaveBeenCalled();
+                    // Footer layout uses the deferred path while the initial target
+                    // still includes the previous dataset's footer height.
+                    expect(doMaintainScrollAtEnd(mockCtx)).toBe(false);
+                    expect(mockState.pendingMaintainScrollAtEnd).toBe(true);
+                    expect(scrollToEndSpy).not.toHaveBeenCalled();
 
-            finishScrollTo(mockCtx);
+                    finishScrollTo(mockCtx);
+                    if (platform !== "web") rafCallback?.();
 
-            expect(mockState.didFinishInitialScroll).toBe(true);
-            expect(scrollToEndSpy).toHaveBeenCalledTimes(1);
-            expect(mockState.pendingMaintainScrollAtEnd).toBe(false);
-        });
+                    expect(mockState.didFinishInitialScroll).toBe(true);
+                    expect(scrollToEndSpy).toHaveBeenCalledTimes(1);
+                    expect(mockState.pendingMaintainScrollAtEnd).toBe(false);
+                });
+            }
+        }
 
         it("should handle didContainersLayout being undefined", () => {
             mockState.didContainersLayout = mockState.didFinishInitialScroll = undefined;
@@ -546,7 +552,7 @@ describe("doMaintainScrollAtEnd", () => {
             }
         });
 
-        it("should coalesce multiple rapid calls", () => {
+        it("coalesces calls before the queued follow without replaying them after completion", async () => {
             const firstResult = runMaintainScrollAtEnd(true);
 
             // Second call before first RAF executes
@@ -560,6 +566,10 @@ describe("doMaintainScrollAtEnd", () => {
 
             expect(mockRunTrackedScrollToEnd).toHaveBeenCalledTimes(1);
             expect(scrollToEndSpy).toHaveBeenCalledWith(mockCtx, { animated: true });
+            await finishNextImperativeScroll();
+            expect(mockState.maintainingScrollAtEnd).toBeUndefined();
+            expect(mockState.pendingMaintainScrollAtEnd).toBe(false);
+            expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
         });
 
         it("cancels coalesced maintain requests when the scroll position changes away from the end", () => {
@@ -568,7 +578,7 @@ describe("doMaintainScrollAtEnd", () => {
             expect(result).toBe(true);
 
             runMaintainScrollAtEnd(false);
-            expect(mockState.pendingMaintainScrollAtEnd).toBe(true);
+            expect(mockState.pendingMaintainScrollAtEnd).toBe(false);
 
             mockState.scroll = 50;
             mockState.isWithinMaintainScrollAtEndThreshold = false;
@@ -657,13 +667,12 @@ describe("doMaintainScrollAtEnd", () => {
             expect(mockState.maintainingScrollAtEnd).toBe("pending-instant");
 
             mockState.isMomentumScrolling = true;
-            mockState.releasedFromUserDrag = true;
+            mockState.userScrollContentSize = 1000;
             rafCallback?.();
 
             expect(scrollToEndSpy).not.toHaveBeenCalled();
             expect(mockState.maintainingScrollAtEnd).toBeUndefined();
             expect(mockState.pendingMaintainScrollAtEnd).toBe(false);
-            expect(mockState.didDeferMaintainScrollAtEndForMomentum).toBe(true);
         });
 
         it(`discards a queued follow frame when dragging on ${platform}`, () => {

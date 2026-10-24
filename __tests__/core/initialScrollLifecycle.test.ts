@@ -58,9 +58,7 @@ describe("initialScrollLifecycle", () => {
             state.pendingScrollResolve = resolve;
             state.maintainingScrollAtEnd = "pending-instant";
             state.pendingMaintainScrollAtEnd = true;
-            state.didDeferMaintainScrollAtEndForMomentum = true;
-            state.momentumSuspendContentSize = 1000;
-            state.momentumSuspendCompensated = true;
+            state.userScrollContentSize = 1000;
             state.scheduledWork.register("platformScrollCompletion", cancelCompletion);
             state.endFollowInterrupted = true;
             state.visibleContentAnchor = { key: "reader", offset: 20 };
@@ -80,9 +78,7 @@ describe("initialScrollLifecycle", () => {
 
             expect(state.scrollingTo).toBe(didStartFreshData ? undefined : oldTarget);
             expect(state.pendingMaintainScrollAtEnd).toBe(!didStartFreshData);
-            expect(state.didDeferMaintainScrollAtEndForMomentum).toBe(!didStartFreshData);
-            expect(state.momentumSuspendContentSize).toBe(didStartFreshData ? undefined : 1000);
-            expect(state.momentumSuspendCompensated).toBe(!didStartFreshData);
+            expect(state.userScrollContentSize).toBe(didStartFreshData ? undefined : 1000);
             expect(resolve).toHaveBeenCalledTimes(didStartFreshData ? 1 : 0);
             expect(cancelCompletion).toHaveBeenCalledTimes(didStartFreshData ? 1 : 0);
             expect(state.endFollowInterrupted).toBe(!didStartFreshData);

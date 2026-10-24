@@ -26,9 +26,9 @@ Beyond standard `FlatList` capabilities:
 *   `recycleItems`: (boolean) Toggles item component recycling.
     *   `true`: Reuses item components for optimal performance. Be cautious if your item components contain local state, as it might be reused unexpectedly.
     *   `false` (default): Creates new item components every time. Less performant but safer if items have complex internal state.
-*   `maintainScrollAtEnd`: Keeps the list pinned to the tail when the user is already near the end (within `maintainScrollAtEndThreshold * screen height`). Pass `true` for all triggers, or `{ animated?: boolean, on?: { dataChange?: boolean, layout?: boolean, itemLayout?: boolean } }`; if `on` is omitted, the object form also enables all triggers.
-*   `onUserScroll` (experimental): Runs once per accepted user gesture: native drag, web wheel/touch/key/scrollbar input, or iOS status-bar scrolling (at completion unless accessibility motion already reported it). Wheel input at a boundary is ignored unless navigation is active; grouping without momentum metadata is heuristic. Scrollbar detection requires pointer events on the scroller. Layout, clamp, MVCP and commands through the list or its refs do not emit it. With a native screen reader enabled, unowned motion with stable content/viewport size, including focus navigation, counts as accessibility input once per burst; motion toward the start releases end following. Library animations and controller/native-ref command windows mask assistive-tech scrolling. Native commands bypassing the list and its refs (e.g. Reanimated worklets) can also count as accessibility input. Native pointer/wheel-only input without a screen reader is not detected.
-*   `maintainVisibleContentPosition`: Keeps visible content steady during size/layout changes while scrolling up or when items resize above the viewport (default). Pass `true` or `{ data: true }` to also anchor during data updates; pass `false` to disable; pass `{ size: false }` to opt out of scroll-time stabilization.
+*   `maintainScrollAtEnd`: Keeps the list pinned to the tail when the user is already near the end (within `maintainScrollAtEndThreshold * screen height`). Pass `true` for all triggers, or `{ animated?: boolean, on?: { dataChange?: boolean, dataAppend?: boolean, footerLayout?: boolean, layout?: boolean, itemLayout?: boolean } }`; `dataAppend` follows only additions that preserve existing item keys in order. If `on` is omitted, the object form also enables all triggers.
+*   `onUserScroll` (experimental): Runs once per accepted user gesture, including inferred native accessibility scrolling. See the [API JSDoc](src/types.base.ts) for supported input, gesture grouping, and native commands that require `cancelScroll()`.
+*   `maintainVisibleContentPosition`: Keeps visible content steady during size/layout changes while scrolling up or when items resize above the viewport (default). Pass `true` or `{ data: true }` to also anchor during data updates; pass `false` to disable JS size/data stabilization; pass `{ size: false }` to opt out of scroll-time stabilization. Native iOS maintainVisibleContentPosition is enabled when either size or data stabilization is enabled, and disabled when both are disabled.
 *   `alignItemsAtEnd`: (boolean) Useful for chat UIs, content smaller than the View will be aligned to the bottom of the list.
 
 ---
@@ -75,7 +75,7 @@ interface UserData {
 }
 
 const LegendListExample = () => {
-    // Optional: Ref for accessing list methods (e.g., scrollTo)
+    // Optional: Ref for accessing list methods (e.g., scrollToIndex)
     const listRef = useRef<LegendListRef | null>(null)
 
     const data = []

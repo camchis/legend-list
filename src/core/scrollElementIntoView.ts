@@ -2,26 +2,28 @@ import { cancelScroll } from "@/core/cancelScroll";
 import { getObservedScrollOffset } from "@/core/emitMetrics";
 import { scrollTo } from "@/core/scrollTo";
 import type { StateContext } from "@/state/state";
-import { isHorizontalRTL } from "@/utils/rtl";
+import { getNativeHorizontalRTLScrollType, isHorizontalRTL } from "@/utils/rtl";
 
-export function scrollElementIntoView(ctx: StateContext, animated = false): boolean | "unreachable" {
+export function getScrollElementTargetOffset(ctx: StateContext): number | "unreachable" {
     const { state } = ctx;
     const target = state.scrollElementTarget;
     const node = state.refScroller.current?.getScrollableNode() as Element | null | undefined;
     if (!target || !node?.getBoundingClientRect) return "unreachable";
     const ancestor =
         "commonAncestorContainer" in target.element ? target.element.commonAncestorContainer : target.element;
-    if (!ancestor.isConnected) {
-        if (state.scrollingTo && !ctx.scrollRequestTracker?.isWaitingToRun()) cancelScroll(ctx, true, "unreachable");
-        state.scrollElementTarget = undefined;
-        return "unreachable";
-    }
+    if (!ancestor.isConnected) return "unreachable";
     const rect = target.element.getBoundingClientRect();
-    const viewport = state.refScroller.current?.isWindowScroll?.()
-        ? { bottom: window.innerHeight, left: 0, right: window.innerWidth, top: 0 }
-        : node.getBoundingClientRect();
+    let viewport: { bottom: number; left: number; right: number; top: number };
+    if (state.refScroller.current?.isWindowScroll?.()) {
+        viewport = { bottom: window.innerHeight, left: 0, right: window.innerWidth, top: 0 };
+    } else {
+        const bounds = node.getBoundingClientRect();
+        const top = bounds.top + node.clientTop;
+        const left = bounds.left + node.clientLeft;
+        viewport = { bottom: top + node.clientHeight, left, right: left + node.clientWidth, top };
+    }
     const horizontal = state.props.horizontal;
-    const rtl = isHorizontalRTL(state);
+    const rtl = isHorizontalRTL(state) && getNativeHorizontalRTLScrollType(state) !== "normal";
     const start = horizontal
         ? rtl
             ? -viewport.right
@@ -46,7 +48,18 @@ export function scrollElementIntoView(ctx: StateContext, animated = false): bool
             : targetEnd > end
               ? Math.min(targetStart - start, targetEnd - end)
               : 0);
-    if (Math.abs(delta) <= 1) return false;
-    scrollTo(ctx, { animated, offset: getObservedScrollOffset(ctx) + delta });
+    return getObservedScrollOffset(ctx) + delta;
+}
+
+export function scrollElementIntoView(ctx: StateContext): boolean | "unreachable" {
+    const offset = getScrollElementTargetOffset(ctx);
+    if (offset === "unreachable") {
+        if (ctx.state.scrollingTo && !ctx.scrollRequestTracker?.isWaitingToRun())
+            cancelScroll(ctx, true, "unreachable");
+        ctx.state.scrollElementTarget = undefined;
+        return "unreachable";
+    }
+    if (Math.abs(offset - getObservedScrollOffset(ctx)) <= 1) return false;
+    scrollTo(ctx, { animated: ctx.state.scrollElementTarget?.animated ?? false, offset });
     return true;
 }

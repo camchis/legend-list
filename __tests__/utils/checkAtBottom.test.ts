@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import "../setup";
 
 import { clampScrollOffset } from "../../src/core/clampScrollOffset";
@@ -485,6 +485,20 @@ describe("checkAtBottom", () => {
             contentSize: 1000,
             dataLength: 1,
         });
+    });
+
+    it("uses the processed offset for the end-distance signal without reading the scroller", () => {
+        const ctx = createMockContext({ totalSize: 1000 }, { scroll: 300, scrollLength: 200 });
+        const getCurrentScrollOffset = mock(() => 700);
+        ctx.state.refScroller.current = { getCurrentScrollOffset } as any;
+
+        checkAtBottom(ctx);
+
+        expect(ctx.values.get("distanceFromEnd")).toBe(500);
+        expect(getCurrentScrollOffset).not.toHaveBeenCalled();
+        ctx.state.scroll = 900;
+        checkAtBottom(ctx);
+        expect(ctx.values.get("distanceFromEnd")).toBe(0);
     });
 
     it("publishes the end distance as a listenable signal", () => {

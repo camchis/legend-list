@@ -695,6 +695,224 @@ describe("updateScroll user scroll ownership", () => {
         return { ctx, onUserScroll };
     }
 
+    it.each(["ios", "android"] as const)("releases native following after an unowned scroll away on %s", (platform) => {
+        Platform.OS = platform;
+        const ctx = createMockContext(
+            { isFollowingEnd: true, totalSize: 1000 },
+            {
+                didContainersLayout: true,
+                didFinishInitialScroll: true,
+                props: { data: [{}], maintainScrollAtEnd: true },
+                queuedInitialLayout: true,
+                scroll: 800,
+                scrollLength: 200,
+                triggerCalculateItemsInView: () => {},
+            },
+        );
+
+        updateScroll(ctx, 0, true, { fromNativeScrollEvent: true });
+
+        expect(peek$(ctx, "isFollowingEnd")).toBe(false);
+        expect(peek$(ctx, "isWithinMaintainScrollAtEndThreshold")).toBe(false);
+        expect(doMaintainScrollAtEndModule.doMaintainScrollAtEnd(ctx)).toBe(false);
+        ctx.state.scheduledWork.dispose();
+    });
+
+    it.each(["isDragging", "isMomentumScrolling", "endFollowRearm"] as const)(
+        "leaves native gesture ownership with %s",
+        (owner) => {
+            Platform.OS = "ios";
+            const ctx = createMockContext(
+                { isFollowingEnd: true, totalSize: 1000 },
+                {
+                    isDragging: owner === "isDragging",
+                    isMomentumScrolling: owner === "isMomentumScrolling",
+                    scroll: 800,
+                    scrollLength: 200,
+                    triggerCalculateItemsInView: () => {},
+                    userScrollContentSize: owner === "isDragging" ? undefined : 1000,
+                },
+            );
+            if (owner === "endFollowRearm") {
+                ctx.state.scheduledWork.timeout(() => {}, 1000, "endFollowRearm");
+            }
+            updateScroll(ctx, 600, true, { fromNativeScrollEvent: true });
+            expect(peek$(ctx, "isFollowingEnd")).toBe(true);
+            ctx.state.scheduledWork.dispose();
+        },
+    );
+
+    it.each(["ios", "android"] as const)("releases following during baseline-free momentum on %s", (platform) => {
+        Platform.OS = platform;
+        const ctx = createMockContext(
+            { isFollowingEnd: true, totalSize: 1000 },
+            {
+                isMomentumScrolling: true,
+                scroll: 690,
+                scrollLength: 300,
+                triggerCalculateItemsInView: () => {},
+            },
+        );
+        try {
+            updateScroll(ctx, 400, true, { fromNativeScrollEvent: true });
+
+            expect(peek$(ctx, "isFollowingEnd")).toBe(false);
+            expect(peek$(ctx, "isWithinMaintainScrollAtEndThreshold")).toBe(false);
+            expect(ctx.state.endFollowInterrupted).toBe(true);
+            expect(ctx.state.isMomentumScrolling).toBe(true);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
+    it.each(["geometry", "adjustment", "mvcp", "request", "active maintenance", "pending maintenance"] as const)(
+        "preserves following during baseline-free momentum with %s ownership",
+        (owner) => {
+            Platform.OS = "ios";
+            const ctx = createMockContext(
+                { isFollowingEnd: true, totalSize: 1000 },
+                {
+                    isMomentumScrolling: true,
+                    scroll: 690,
+                    scrollLength: 300,
+                    triggerCalculateItemsInView: () => {},
+                },
+            );
+            if (owner === "adjustment") ctx.state.lastScrollAdjustForHistory = 10;
+            if (owner === "mvcp") {
+                ctx.state.pendingNativeMVCPAdjust = {
+                    amount: -300,
+                    furthestProgressTowardAmount: 0,
+                    manualApplied: 0,
+                    startScroll: 690,
+                };
+            }
+            if (owner === "request") {
+                ctx.state.scrollingTo = { offset: 400 } as any;
+                ctx.state.pendingScrollResolve = mock(() => {});
+            }
+            if (owner === "active maintenance") ctx.state.maintainingScrollAtEnd = "animated";
+            if (owner === "pending maintenance") ctx.state.pendingMaintainScrollAtEnd = true;
+            const request = ctx.state.scrollingTo;
+            const resolve = ctx.state.pendingScrollResolve;
+            try {
+                updateScroll(ctx, 400, true, {
+                    fromNativeScrollEvent: true,
+                    nativeGeometryChanged: owner === "geometry",
+                });
+
+                expect(peek$(ctx, "isFollowingEnd")).toBe(true);
+                expect(ctx.state.endFollowInterrupted).not.toBe(true);
+                expect(ctx.state.scrollingTo).toBe(request);
+                expect(ctx.state.pendingScrollResolve).toBe(resolve);
+                if (resolve) expect(resolve).not.toHaveBeenCalled();
+            } finally {
+                ctx.state.scheduledWork.dispose();
+            }
+        },
+    );
+
+    function createMomentumGeometryContext() {
+        const ctx = createMockContext(
+            { isFollowingEnd: false, totalSize: 1000 },
+            {
+                didContainersLayout: true,
+                didFinishInitialScroll: true,
+                endFollowInterrupted: true,
+                isMomentumScrolling: true,
+                props: { data: [{}], maintainScrollAtEnd: true, maintainScrollAtEndThreshold: 0.25 },
+                queuedInitialLayout: true,
+                scroll: 400,
+                scrollLength: 300,
+                triggerCalculateItemsInView: () => {},
+            },
+        );
+        ctx.state.scheduledWork.timeout(() => {}, 1000, "endFollowRearm");
+        return ctx;
+    }
+
+    it.each([
+        { follows: true, path: [690], start: 400 },
+        { follows: true, path: [700], start: 400 },
+        { follows: true, path: [690], start: 700 },
+        { follows: false, path: [690, 400], start: 400 },
+        { follows: true, path: [400, 690], start: 690 },
+    ])("recomputes baseline-free momentum geometry: %j", ({ start, path, follows }) => {
+        Platform.OS = "ios";
+        const ctx = createMomentumGeometryContext();
+        ctx.state.scroll = start;
+        try {
+            for (const offset of path) updateScroll(ctx, offset, true, { fromNativeScrollEvent: true });
+            expect(peek$(ctx, "isWithinMaintainScrollAtEndThreshold")).toBe(follows);
+            expect(peek$(ctx, "isFollowingEnd")).toBe(follows);
+            expect(ctx.state.endFollowInterrupted).toBe(!follows);
+            expect(ctx.state.scroll).toBe(path.at(-1)!);
+            expect(ctx.state.isMomentumScrolling).toBe(true);
+            expect(ctx.state.scheduledWork.has("endFollowRearm")).toBe(true);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
+    it.each(["active request", "pending request", "reader anchor", "app timer", "dragging", "release baseline"])(
+        "preserves %s ownership when near-end geometry is recomputed",
+        (owner) => {
+            Platform.OS = "ios";
+            const ctx = createMomentumGeometryContext();
+            if (owner === "active request") ctx.state.scrollingTo = { offset: 690 } as any;
+            if (owner === "pending request") ctx.state.pendingScrollResolve = mock(() => {});
+            if (owner === "reader anchor") ctx.state.visibleContentAnchor = { key: "reader", offset: 20 };
+            if (owner === "app timer") ctx.state.scheduledWork.timeout(() => {}, 1000, "appScrollRearm");
+            if (owner === "dragging") ctx.state.isDragging = true;
+            if (owner === "release baseline") ctx.state.userScrollContentSize = 1000;
+            const request = ctx.state.scrollingTo;
+            const resolve = ctx.state.pendingScrollResolve;
+            const anchor = ctx.state.visibleContentAnchor;
+            try {
+                updateScroll(ctx, 690, true);
+                expect(peek$(ctx, "isWithinMaintainScrollAtEndThreshold")).toBe(true);
+                expect(peek$(ctx, "isFollowingEnd")).toBe(false);
+                expect(ctx.state.endFollowInterrupted).toBe(true);
+                expect(ctx.state.scrollingTo).toBe(request);
+                expect(ctx.state.pendingScrollResolve).toBe(resolve);
+                expect(ctx.state.visibleContentAnchor).toBe(anchor);
+                if (resolve) expect(resolve).not.toHaveBeenCalled();
+            } finally {
+                ctx.state.scheduledWork.dispose();
+            }
+        },
+    );
+
+    it("reads the web maximum only when an observed offset moves backward", () => {
+        Platform.OS = "web";
+        const getMaxScrollOffset = mock(() => 700);
+        const ctx = createMockContext(
+            { isFollowingEnd: true, totalSize: 1000 },
+            {
+                didFinishInitialScroll: true,
+                props: { data: [{}], maintainScrollAtEnd: true },
+                queuedInitialLayout: true,
+                refScroller: { current: { getMaxScrollOffset } } as any,
+                scroll: 800,
+                scrollLength: 200,
+            },
+        );
+        try {
+            updateScroll(ctx, 800, true, { fromNativeScrollEvent: true });
+            expect(getMaxScrollOffset).not.toHaveBeenCalled();
+            updateScroll(ctx, 900, true, { fromNativeScrollEvent: true });
+            expect(getMaxScrollOffset).not.toHaveBeenCalled();
+            updateScroll(ctx, 700, true, { fromNativeScrollEvent: true });
+            expect(getMaxScrollOffset).toHaveBeenCalledTimes(1);
+            expect(peek$(ctx, "isFollowingEnd")).toBe(true);
+            updateScroll(ctx, 600, true, { fromNativeScrollEvent: true });
+            expect(getMaxScrollOffset).toHaveBeenCalledTimes(2);
+            expect(peek$(ctx, "isFollowingEnd")).toBe(false);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
     it("never reports user input from unowned web or native offset events", () => {
         for (const platform of ["web", "ios"] as const) {
             Platform.OS = platform;

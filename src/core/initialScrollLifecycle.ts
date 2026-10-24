@@ -138,9 +138,7 @@ export function handleInitialScrollDataChange(
         cancelImperativeScroll(state, "unreachable");
         set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
         state.endFollowInterrupted = false;
-        state.didDeferMaintainScrollAtEndForMomentum = false;
-        state.momentumSuspendContentSize = undefined;
-        state.momentumSuspendCompensated = false;
+        state.userScrollContentSize = undefined;
         state.visibleContentAnchor = undefined;
         state.pendingEndMeasurements = undefined;
         state.scrollElementTarget = undefined;

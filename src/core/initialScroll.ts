@@ -199,10 +199,6 @@ export function advanceCurrentInitialScrollSession(
     },
 ) {
     return ctx.state.initialScrollSession?.kind === "offset"
-        ? advanceOffsetInitialScroll(ctx, {
-              forceScroll: options?.forceScroll,
-          })
-        : advanceMeasuredInitialScroll(ctx, {
-              forceScroll: options?.forceScroll,
-          });
+        ? advanceOffsetInitialScroll(ctx, options)
+        : advanceMeasuredInitialScroll(ctx, options);
 }

@@ -1,6 +1,6 @@
 import { settlePendingImperativeScroll } from "@/core/cancelImperativeScroll";
 import { cancelScroll } from "@/core/cancelScroll";
-import { interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { interruptMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
 import { type StateContext, set$ } from "@/state/state";
 import type { LegendListScrollResult } from "@/types.base";
 import type { ScrollResolve } from "@/types.internal";
@@ -25,6 +25,8 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
             const state = ctx.state;
             // A newer explicit target supersedes automatic end-follow intent.
             if (!isInternal) {
+                // A visible replacement may dispatch nothing, so stop the superseded motion first.
+                if (state.scrollingTo?.animated) cancelScroll(ctx);
                 state.scheduledWork.cancel("appScrollRearm");
                 state.pendingEndMeasurements = undefined;
                 state.visibleContentAnchor = undefined;
@@ -67,6 +69,7 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
                         !!state.scrollingTo ||
                         !!state.pendingScrollResolve,
                 );
+                rearmEndFollowIfSettled(ctx);
                 resolve();
             }
         };

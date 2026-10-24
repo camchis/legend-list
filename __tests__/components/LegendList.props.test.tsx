@@ -11,6 +11,7 @@ let scrollToCalls: any[] = [];
 
 import { spyOn } from "bun:test";
 import * as calculateModule from "../../src/core/calculateItemsInView";
+import * as allocationModule from "../../src/core/doInitialAllocateContainers";
 import * as followModule from "../../src/core/doMaintainScrollAtEnd";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import type { ScrollAdjustHandler } from "../../src/core/ScrollAdjustHandler";
@@ -131,6 +132,22 @@ beforeEach(() => {
 });
 
 describe("LegendList props behavior", () => {
+    it("skips data allocation for equivalent inline key extractors", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?inline-extractor-allocation");
+        const data = [{ id: "a" }];
+        const renderItem = () => null;
+        const list = () => <LegendList data={data} keyExtractor={(item) => item.id} renderItem={renderItem} />;
+        const rendered = render(list());
+        const allocate = spyOn(allocationModule, "doInitialAllocateContainers");
+        try {
+            await act(async () => rendered.rerender(list()));
+            expect(allocate).not.toHaveBeenCalled();
+        } finally {
+            allocate.mockRestore();
+            rendered.unmount();
+        }
+    });
+
     it("does not recalculate all fixed sizes for an equivalent inline callback", async () => {
         const { LegendList } = await import("../../src/components/LegendList?fixed-inline-stable");
         const data = Array.from({ length: 100 }, (_, id) => ({ id }));
@@ -527,12 +544,14 @@ describe("LegendList props behavior", () => {
                     renderItem={renderItem}
                 />,
             );
-            const state = await getStateFromRender();
+            const ctx = await getContextFromRender();
+            const state = ctx.state;
+            set$(ctx, "isScrollActive", true);
             const lifecycleState = state as any;
             lifecycleState.scheduledWork.register("checkFinishedScrollFrame", () => cancelAnimationFrame(0));
             lifecycleState.scheduledWork.register("platformScrollCompletion", cancelPlatformCompletion);
             lifecycleState.pendingScrollResolve = resolveScroll;
-            lifecycleState.pendingScrollToEnd = { options: {}, resolve: resolveScroll, token: 1 };
+            lifecycleState.pendingScrollToEnd = { options: {}, token: 1 };
             lifecycleState.scrollingTo = { animated: false, offset: 100 };
             lifecycleState.scrollTargetPinnedRange = { end: 1, start: 0 };
 
@@ -545,6 +564,7 @@ describe("LegendList props behavior", () => {
             expect(lifecycleState.pendingScrollToEnd).toBeUndefined();
             expect(lifecycleState.scrollingTo).toBeUndefined();
             expect(lifecycleState.scrollTargetPinnedRange).toBeUndefined();
+            expect(peek$(ctx, "isScrollActive")).toBe(false);
         } finally {
             globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
         }

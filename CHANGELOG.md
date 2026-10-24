@@ -1,3 +1,52 @@
+## 3.7.0
+
+- Types: List ref methods `scrollToIndex`, `scrollToOffset`, `scrollToItem`, `scrollToKey`, `scrollToEnd`, `scrollIndexIntoView`, and `scrollItemIntoView` now return `Promise<LegendListScrollResult>`, resolving `undefined` on landing or `{ reason: "interrupted" | "superseded" | "unreachable" }` when stopped by user input, canceled/replaced, or unable to reach the target (including removed targets, dataset replacement, and unmounting). Update explicit `Promise<void>` return annotations; fire-and-forget calls still work. Underlying scroll-view `scrollTo` and SectionList `scrollToLocation` still return `void`.
+
+    Suspense/Activity hide counts as unmounting for scroll requests. Requests made through a captured ref while hidden resolve `{ reason: "unreachable" }` and are not replayed on reveal.
+
+    `scrollToIndex` and `scrollToOffset` clamp out-of-range targets and resolve as landed. Index-based navigation and `scrollToEnd` on empty data resolve `unreachable`, including when a header or footer is present.
+
+    ```ts
+    import type { LegendListScrollResult } from "@legendapp/list/react-native";
+
+    // Before: const scroll = (): Promise<void> => listRef.current!.scrollToEnd();
+    // After:
+    const scroll = (): Promise<LegendListScrollResult> => listRef.current!.scrollToEnd();
+    const result = await scroll();
+    if (result) console.log(result.reason);
+    ```
+
+- Types: new required members on `LegendListRef` / state / metrics since 3.6.0. Code that implements or mocks these types must add:
+
+    - `LegendListRef` (native and web): `cancelScroll`, `scrollToKey`, `getScrollAnchor`, `anchorVisibleContent`.
+    - `LegendListRef` (web only): `scrollElementIntoView`.
+    - `LegendListState`: `dataEpoch`, `distanceFromEnd`, `isFollowingEnd`.
+    - `LegendListMetrics`: `contentLength`, `scrollLength`, `scroll`, `distanceFromEnd`, `isAtEnd`, `isFollowingEnd`.
+    - `SectionListRef`: `cancelScroll`, `scrollToKey`, `getScrollAnchor`, `anchorVisibleContent` (inherited from `LegendListRef`).
+
+- Feat: Add ref methods `cancelScroll` to stop queued and active scrolling, `scrollToKey` to navigate by stable item key through prepends, `getScrollAnchor` to capture the first visible item and its offset, and `anchorVisibleContent` to keep a visible item in place through layout changes.
+- Feat: Add web-only `scrollElementIntoView({ element, viewPosition, animated, viewportMargin })` to reveal a DOM element or text Range inside a row, and `viewportMargin` to `scrollIndexIntoView`.
+- Feat: Add `trackScrollMetrics` to opt into scroll and end-follow metrics through `onMetricsChange`, which otherwise fires only for header/footer size changes, and expose `distanceFromEnd`, `isFollowingEnd`, `dataKey`, and `dataEpoch` through `getState()`.
+- Feat: Add boolean `maintainScrollAtEnd.on.dataAppend` to follow only additions that preserve existing item keys in order; `on.dataChange` remains a boolean option for all data changes.
+- Feat: `onUserScroll` fires once per accepted real user gesture (native drag with its momentum, web touch/wheel gesture, scroll key press, scrollbar input, or iOS status-bar tap), never for library or list-ref scrolls, and remains `@experimental` with heuristic wheel grouping and gaps in native pointer/wheel-only and web overlay scrollbar detection.
+- Fix: With a native screen reader enabled, unowned accessibility scrolling toward the start releases end following and reports `onUserScroll` once per burst; assistive input during library animations or native-ref command windows can be missed, and scrolls bypassing the list/ref (such as Reanimated `scrollTo` worklets) cannot be distinguished from accessibility input, so call `cancelScroll()` on the JS thread before that navigation.
+- Fix: Leftover trackpad momentum no longer cancels scroll commands; a new wheel gesture can interrupt them, while upward wheel motion releases automatic end following as in 3.6.0 and downward motion never does.
+- Fix: `getNativeScrollRef`, `getAnimatableRef`, and `getScrollResponder` return stable wrappers whose JS scroll commands release end following and supersede list scrolling; their identity differs from the original native instances. iOS status-bar taps release following and resolve an interrupted scroll with `{ reason: "interrupted" }`.
+- Fix: Native scrolls outside list-owned commands release end following when they move beyond its threshold, and appends while reading earlier rows leave no pending end measurements.
+- Fix: Pausing `maintainScrollAtEnd` retains end intent for resuming; `isFollowingEnd` continues to report that intent while paused.
+- Fix: Item-layout end following responds to every nonzero size change when its trigger is enabled.
+- Fix: End thresholds (`isAtEnd`, `onEndReached`, and `maintainScrollAtEnd`) count trailing content and keyboard insets once. With a trailing inset, they now activate closer to the physical end instead of firing early by the inset amount.
+- Fix: Row measurements and header/footer size changes recheck `onStartReached` and `onEndReached` thresholds, so pagination callbacks can fire without a scroll when layout brings an edge within its threshold.
+- Fix: Animated end following stays aligned through short-list growth, footer and viewport changes, late row measurements, and native drag-to-momentum handoffs. #563 #568
+- Fix: Automatic native end following waits for a drag and its momentum to settle, then catches up near the end using the configured threshold.
+- Fix: Keyed scroll targets survive prepends and same-key item updates, cached dataset switches restart initial placement, and fixed-size updates and cache clearing preserve the reader's anchor.
+- Fix: `scrollToOffset` can reach `contentContainerStyle` minimum sizes, and web element scrolling uses the correct window or horizontal viewport, including RTL offsets and start padding.
+- Fix: When `getFixedItemSize` is set, changing `extraData` invalidates all fixed sizes and repositions the data.
+- Fix: Inline `onMetricsChange` callbacks no longer cause repeated metrics emissions.
+- Fix: Keyboard occlusion is excluded from viewability calculations, horizontal viewability uses the correct start padding including RTL, and native content insets are counted only where applied.
+- Fix: `scrollMessageToEnd({ closeKeyboard: true })` unfreezes keyboard tracking and waits for dismissal before scrolling to the end, so its target uses the final keyboard inset.
+- Perf: With `recycleItems` enabled, reuse warm offscreen rows before empty containers, and skip key extraction for unchanged append prefixes.
+
 ## 3.6.0
 
 - Feat: Add `viewPositionFallback` to align oversized items to the start or end of the viewport during initial or programmatic scrolling, while keeping `viewPosition` alignment for items that fit.

@@ -60,7 +60,7 @@ type ScrollMessageToEndOptions = {
 
 type KeyboardScrollToEndListRef = {
     current: {
-        getState: LegendListRef["getState"];
+        getState?: LegendListRef["getState"];
         scrollToEnd: LegendListRef["scrollToEnd"];
     } | null;
 };
@@ -125,7 +125,7 @@ export function useKeyboardScrollToEnd({ freeze: freezeProp, listRef }: UseKeybo
             const requestedList = listRef.current;
             if (!requestedList) return;
             const request = ++latestRequest.current;
-            const dataEpoch = requestedList.getState().dataEpoch;
+            const dataEpoch = requestedList.getState?.().dataEpoch;
             if (closeKeyboard) {
                 freeze.set(false);
                 await KeyboardController.dismiss();
@@ -134,7 +134,7 @@ export function useKeyboardScrollToEnd({ freeze: freezeProp, listRef }: UseKeybo
             if (
                 request !== latestRequest.current ||
                 currentList !== requestedList ||
-                currentList.getState().dataEpoch !== dataEpoch
+                currentList.getState?.().dataEpoch !== dataEpoch
             )
                 return;
             freeze.set(true);

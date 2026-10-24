@@ -214,6 +214,19 @@ describe("findAvailableContainers", () => {
         });
     }
 
+    it("keeps nearby offscreen rows mounted when recycling is disabled", () => {
+        ctx.values.set("numContainers", 3);
+        ctx.values.set("containerItemKey0", "item0");
+        ctx.values.set("containerItemKey1", "item2");
+        mockState.indexByKey.set("item0", 0);
+        mockState.indexByKey.set("item2", 2);
+        mockState.props.recycleItems = false;
+
+        const result = findAvailableContainers(ctx, [4], 1, 4, []);
+
+        expect(result[0].containerIndex).toBe(2);
+    });
+
     describe("when there are unallocated containers", () => {
         it("should return unallocated containers first", () => {
             // Setup container data via context
@@ -702,6 +715,7 @@ describe("findAvailableContainers", () => {
 
     describe("performance benchmarks", () => {
         it("should handle large container pools efficiently", () => {
+            mockState.props.recycleItems = true;
             const numContainers = 1000;
             ctx.values.set("numContainers", numContainers);
 

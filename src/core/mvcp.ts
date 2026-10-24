@@ -268,6 +268,9 @@ export function prepareMVCP(
         scrollTarget >= state.props.data.length - 1 &&
         (scrollingToViewPosition ?? 0) > 0;
 
+    if (dataChanged && state.visibleContentAnchor?.sizeOnly) {
+        state.visibleContentAnchor = undefined;
+    }
     const explicitAnchor = state.visibleContentAnchor;
     const shouldMVCP = !!explicitAnchor || (dataChanged ? mvcpData : mvcpScroll);
     const indexByKey = state.indexByKey;

@@ -74,6 +74,21 @@ describe("cancelScroll", () => {
         expect(scrollTo).toHaveBeenCalledWith({ animated: false, x: rawOffset, y: 0 });
     });
 
+    it.each(["ios", "android"] as const)("uses the minWidth extent when cancelling %s RTL", (platform) => {
+        Platform.OS = platform;
+        const { ctx, scrollTo } = createScrollingContext(
+            { animated: true, offset: 1600 },
+            { contentContainerMinSize: 2000, data: [], horizontal: true, rtl: true },
+        );
+        ctx.values.set("totalSize", 300);
+        ctx.state.refScroller.current = { scrollTo } as any;
+        ctx.state.lastNativeScroll = ctx.state.scroll = ctx.state.scrollPending = 1400;
+        ctx.state.horizontalRTLScrollType = "inverted";
+        cancelScroll(ctx);
+        expect(scrollTo).toHaveBeenCalledWith({ animated: false, x: 300, y: 0 });
+        ctx.state.scheduledWork.dispose();
+    });
+
     it("syncs the observed offset inside the MVCP ignore window before committing deferred adjustments", () => {
         const { ctx } = createScrollingContext({ animated: true, offset: 900 });
         ctx.state.refScroller.current = { scrollTo: mock(() => {}) } as any;

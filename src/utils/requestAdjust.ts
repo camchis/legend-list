@@ -25,8 +25,8 @@ export function requestAdjust(ctx: StateContext, positionDiff: number, source?: 
         };
         state.scroll += positionDiff;
         // Growth already served by MVCP must not also count as end-follow credit.
-        if (positionDiff > 0 && state.momentumSuspendContentSize !== undefined) {
-            state.momentumSuspendCompensated = true;
+        if (state.userScrollContentSize !== undefined) {
+            state.userScrollContentSize += positionDiff;
         }
         state.scrollForNextCalculateItemsInView = undefined;
 
