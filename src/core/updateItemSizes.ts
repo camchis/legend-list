@@ -12,9 +12,10 @@ import { getItemSize, type ResolvedItemSize } from "@/utils/getItemSize";
 import { roundSize } from "@/utils/helpers";
 import { isNativeLayoutNoise } from "@/utils/layoutMeasurement";
 
-export function runOrScheduleMVCPRecalculate(ctx: StateContext) {
+export function runOrScheduleMVCPRecalculate(ctx: StateContext, isFollowingEnd?: boolean) {
     // Runs the MVCP recalculation pass after item-size changes.
     // On web, an active anchor lock coalesces recalculations to one RAF to reduce oscillating adjustments.
+    // End following scrolls to the already published total, so its positions cannot wait for that RAF.
     const state = ctx.state;
 
     if (state.userScrollAnchorReset !== undefined) {
@@ -22,7 +23,7 @@ export function runOrScheduleMVCPRecalculate(ctx: StateContext) {
         if (state.userScrollAnchorReset?.keys.size === 0) {
             state.userScrollAnchorReset = undefined;
         }
-    } else if (Platform.OS === "web" && state.mvcpAnchorLock) {
+    } else if (Platform.OS === "web" && state.mvcpAnchorLock && !isFollowingEnd) {
         if (!state.scheduledWork.has("mvcpRecalculate")) {
             state.scheduledWork.frame(
                 () => calculateItemsInView(ctx, { doMVCP: true, mvcpAdjustmentSource: "item-size" }),
@@ -103,7 +104,7 @@ function flushItemSizeUpdates(ctx: StateContext, result: ItemSizeUpdateResult) {
             schedulePreservedEndAnchorCorrection(ctx);
         }
         state.scrollForNextCalculateItemsInView = undefined;
-        runOrScheduleMVCPRecalculate(ctx);
+        runOrScheduleMVCPRecalculate(ctx, result.shouldMaintainScrollAtEnd && peek$(ctx, "isFollowingEnd"));
     } else if (result.didMeasureUserScrollAnchorResetItem && state.userScrollAnchorReset?.keys.size === 0) {
         state.userScrollAnchorReset = undefined;
     }
