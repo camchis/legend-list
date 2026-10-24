@@ -15,6 +15,7 @@ import * as allocationModule from "../../src/core/doInitialAllocateContainers";
 import * as followModule from "../../src/core/doMaintainScrollAtEnd";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import type { ScrollAdjustHandler } from "../../src/core/ScrollAdjustHandler";
+import { setFooterSize, setHeaderSize } from "../../src/core/updateContentMetrics";
 import { updateItemSizesBatch } from "../../src/core/updateItemSizes";
 import { updateScroll } from "../../src/core/updateScroll";
 import { Platform } from "../../src/platform/Platform";
@@ -479,9 +480,9 @@ describe("LegendList props behavior", () => {
         act(() => {
             lastListProps.onInternalScrollBeginDrag({ nativeEvent: {} });
             expect(state.isDragging).toBe(true);
-            lastListProps.onInternalScrollEndDrag({ nativeEvent: {} });
+            lastListProps.onInternalScrollEndDrag({ nativeEvent: { contentOffset: { x: 0, y: 0 } } });
             expect(state.isDragging).toBe(false);
-            lastListProps.onMomentumScrollEnd({ nativeEvent: {} });
+            lastListProps.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 0, y: 0 } } });
         });
 
         rendered.rerender(renderList("next"));
@@ -489,9 +490,9 @@ describe("LegendList props behavior", () => {
         act(() => {
             lastListProps.onInternalScrollBeginDrag({ nativeEvent: {} });
             expect(state.isDragging).toBe(true);
-            lastListProps.onInternalScrollEndDrag({ nativeEvent: {} });
+            lastListProps.onInternalScrollEndDrag({ nativeEvent: { contentOffset: { x: 0, y: 0 } } });
             expect(state.isDragging).toBe(false);
-            lastListProps.onMomentumScrollEnd({ nativeEvent: {} });
+            lastListProps.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 0, y: 0 } } });
         });
 
         expect(dragCalls).toEqual(["first", "next"]);
@@ -2110,46 +2111,6 @@ describe("LegendList props behavior", () => {
         rendered.unmount();
     });
 
-    it("replays pending end maintenance when the size component is removed", async () => {
-        const { LegendList } = await import("../../src/components/LegendList?size-component-removal");
-        const data = ["row"];
-        const renderItem = () => null;
-        const SizeComponent = () => null;
-        const list = (sizeComponentInternal?: typeof SizeComponent) => (
-            <LegendList
-                data={data}
-                maintainScrollAtEnd
-                renderItem={renderItem}
-                {...({ sizeComponentInternal } as any)}
-            />
-        );
-        const rendered = render(list(SizeComponent));
-        const state = await getStateFromRender();
-        state.pendingMaintainScrollAtEnd = true;
-        const maintain = spyOn(followModule, "doMaintainScrollAtEnd").mockReturnValue(true);
-        await act(async () => {
-            rendered.rerender(list(SizeComponent));
-        });
-        expect(maintain).not.toHaveBeenCalled();
-        await act(async () => {
-            rendered.rerender(list());
-        });
-        expect(maintain).toHaveBeenCalledTimes(1);
-        maintain.mockRestore();
-        rendered.unmount();
-    });
-
-    it("resumes end maintenance through the state callback", async () => {
-        const { LegendList } = await import("../../src/components/LegendList?resume-maintain");
-        const rendered = render(<LegendList data={["row"]} maintainScrollAtEnd renderItem={() => null} />);
-        const state = await getStateFromRender();
-        const maintain = spyOn(followModule, "doMaintainScrollAtEnd").mockReturnValue(true);
-        state.resumeMaintainScrollAtEnd();
-        expect(maintain).toHaveBeenCalledTimes(1);
-        maintain.mockRestore();
-        rendered.unmount();
-    });
-
     it("does not reallocate unchanged pins when the default key callback is recreated", async () => {
         const { LegendList } = await import("../../src/components/LegendList?semantic-pins");
         const data = ["row"];
@@ -2203,31 +2164,30 @@ describe("LegendList props behavior", () => {
             rendered.rerender(list(next));
         });
         expect(next).toHaveBeenCalledTimes(1);
-        expect(next).toHaveBeenCalledWith(
-            expect.objectContaining({ contentLength: expect.any(Number), distanceFromEnd: expect.any(Number) }),
-        );
+        expect(next).toHaveBeenCalledWith({ footerSize: 0, headerSize: 0 });
         rendered.unmount();
     });
 
-    it("re-emits current geometry when trackScrollMetrics changes", async () => {
-        const { LegendList } = await import("../../src/components/LegendList?metrics-tracking-toggle");
-        const data = ["row"];
-        const renderItem = () => null;
+    it("reports only header and footer size changes through onMetricsChange", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?metrics-header-footer");
         const onMetricsChange = mock(() => {});
-        const list = (trackScrollMetrics: boolean) => (
-            <LegendList
-                data={data}
-                onMetricsChange={onMetricsChange}
-                renderItem={renderItem}
-                trackScrollMetrics={trackScrollMetrics}
-            />
+        const rendered = render(
+            <LegendList data={["row"]} onMetricsChange={onMetricsChange} renderItem={() => null} />,
         );
-        const rendered = render(list(false));
-        const callsBefore = onMetricsChange.mock.calls.length;
-        await act(async () => {
-            rendered.rerender(list(true));
+        const ctx = await getContextFromRender();
+        act(() => {
+            setHeaderSize(ctx, 20);
         });
-        expect(onMetricsChange).toHaveBeenCalledTimes(callsBefore + 1);
+        expect(onMetricsChange).toHaveBeenLastCalledWith({ footerSize: 0, headerSize: 20 });
+        act(() => {
+            setFooterSize(ctx, 30);
+        });
+        expect(onMetricsChange).toHaveBeenLastCalledWith({ footerSize: 30, headerSize: 20 });
+        const calls = onMetricsChange.mock.calls.length;
+        act(() => {
+            for (const offset of [10, 50, 100]) updateScroll(ctx, offset, true, { fromNativeScrollEvent: true });
+        });
+        expect(onMetricsChange).toHaveBeenCalledTimes(calls);
         rendered.unmount();
     });
 
@@ -2246,7 +2206,7 @@ describe("LegendList props behavior", () => {
         expect(peek$(ctx, "isScrollActive")).toBe(true);
         expect(onMomentumScrollBegin).toHaveBeenCalledTimes(1);
         act(() => {
-            lastListProps.onMomentumScrollEnd({ nativeEvent: {} });
+            lastListProps.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 0, y: 0 } } });
         });
         expect(state.isMomentumScrolling).toBe(false);
         expect(peek$(ctx, "isScrollActive")).toBe(false);
@@ -2255,7 +2215,7 @@ describe("LegendList props behavior", () => {
         });
         expect(peek$(ctx, "isScrollActive")).toBe(true);
         act(() => {
-            lastListProps.onInternalScrollEndDrag({ nativeEvent: {} });
+            lastListProps.onInternalScrollEndDrag({ nativeEvent: { contentOffset: { x: 0, y: 0 } } });
         });
         expect(peek$(ctx, "isScrollActive")).toBe(false);
         rendered.unmount();
@@ -2285,7 +2245,7 @@ describe("LegendList props behavior", () => {
             await act(async () => {
                 lastListProps.onInternalScrollBeginDrag({ nativeEvent: {} });
                 updateScroll(ctx, 790, true, { fromNativeScrollEvent: true });
-                lastListProps.onInternalScrollEndDrag({ nativeEvent: {} });
+                lastListProps.onInternalScrollEndDrag({ nativeEvent: { contentOffset: { x: 0, y: 790 } } });
                 // Layout checks can run between drag-end and momentum-begin.
                 updateScroll(ctx, 790, true);
                 expect(ctx.state.endFollowInterrupted).toBe(true);
@@ -2293,13 +2253,13 @@ describe("LegendList props behavior", () => {
                 flushFrames();
                 expect(followModule.doMaintainScrollAtEnd(ctx)).toBe(false);
                 updateScroll(ctx, 600, true, { fromNativeScrollEvent: true });
-                lastListProps.onMomentumScrollEnd({ nativeEvent: {} });
+                lastListProps.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 0, y: 600 } } });
                 expect(followModule.doMaintainScrollAtEnd(ctx)).toBe(false);
 
                 // A release without momentum rearms after the bounded handoff window.
                 lastListProps.onInternalScrollBeginDrag({ nativeEvent: {} });
                 updateScroll(ctx, 790, true, { fromNativeScrollEvent: true });
-                lastListProps.onInternalScrollEndDrag({ nativeEvent: {} });
+                lastListProps.onInternalScrollEndDrag({ nativeEvent: { contentOffset: { x: 0, y: 790 } } });
                 flushFrames();
                 expect(ctx.state.endFollowInterrupted).toBe(true);
                 await new Promise((resolve) => setTimeout(resolve, 150));
@@ -2308,12 +2268,12 @@ describe("LegendList props behavior", () => {
 
                 // Momentum that ends inside the threshold rearms when it ends.
                 lastListProps.onInternalScrollBeginDrag({ nativeEvent: {} });
-                lastListProps.onInternalScrollEndDrag({ nativeEvent: {} });
+                lastListProps.onInternalScrollEndDrag({ nativeEvent: { contentOffset: { x: 0, y: 790 } } });
                 lastListProps.onMomentumScrollBegin({ nativeEvent: {} });
                 flushFrames();
                 updateScroll(ctx, 790, true, { fromNativeScrollEvent: true });
                 expect(ctx.state.endFollowInterrupted).toBe(true);
-                lastListProps.onMomentumScrollEnd({ nativeEvent: {} });
+                lastListProps.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 0, y: 790 } } });
                 expect(ctx.state.endFollowInterrupted).toBe(false);
                 expect(peek$(ctx, "isFollowingEnd")).toBe(true);
             });

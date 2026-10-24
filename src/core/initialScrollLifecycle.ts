@@ -135,13 +135,12 @@ export function handleInitialScrollDataChange(
 
     if (didStartFreshData) {
         // The previous dataset's scroll must not block or finish the new bootstrap.
-        cancelImperativeScroll(state, "unreachable");
+        cancelImperativeScroll(state);
         set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
         state.endFollowInterrupted = false;
         state.userScrollContentSize = undefined;
         state.visibleContentAnchor = undefined;
         state.pendingEndMeasurements = undefined;
-        state.scrollElementTarget = undefined;
         set$(ctx, "isFollowingEnd", false);
         state.maintainingScrollAtEnd = undefined;
         state.pendingMaintainScrollAtEnd = false;

@@ -1,5 +1,4 @@
 import type { StateContext } from "@/state/state";
-import type { LegendListScrollResult } from "@/types.base";
 
 type InternalState = StateContext["state"];
 
@@ -10,17 +9,14 @@ export function cancelScrollCompletionChecks({ scheduledWork }: InternalState) {
     scheduledWork.cancel("platformScrollCompletion");
 }
 
-type StoppedReason = Exclude<LegendListScrollResult, void>["reason"];
-
-export function settlePendingImperativeScroll(state: InternalState, reason: StoppedReason = "superseded") {
-    state.scheduledWork.cancel("scrollElementTarget");
+export function settlePendingImperativeScroll(state: InternalState) {
     const resolvePendingScroll = state.pendingScrollResolve;
     state.pendingScrollResolve = undefined;
     state.pendingScrollToEnd = undefined;
-    resolvePendingScroll?.({ reason });
+    resolvePendingScroll?.();
 }
 
-export function cancelImperativeScroll(state: InternalState, reason: StoppedReason = "superseded") {
+export function cancelImperativeScroll(state: InternalState) {
     cancelScrollCompletionChecks(state);
     state.scheduledWork.cancel("imperativeScrollReady");
 
@@ -28,5 +24,5 @@ export function cancelImperativeScroll(state: InternalState, reason: StoppedReas
     // recalculate layout and commit adjustments against a list that is already unmounting.
     state.scrollingTo = undefined;
     state.scrollTargetPinnedRange = undefined;
-    settlePendingImperativeScroll(state, reason);
+    settlePendingImperativeScroll(state);
 }

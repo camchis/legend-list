@@ -40,7 +40,7 @@ type LegacyValues = {
     snapToOffsets: number[];
     totalSize: number;
 };
-type Pending = "dataEpoch" | "distanceFromEnd" | "isFollowingEnd";
+type Pending = "distanceFromEnd" | "isFollowingEnd";
 declare const legacyState: Omit<LegendListState, Pending | "listen"> & {
     listen: <T extends keyof LegacyValues>(key: T, callback: (value: LegacyValues[T]) => void) => () => void;
 };

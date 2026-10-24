@@ -37,7 +37,6 @@ const ContainersLayer = typedMemo(function ContainersLayer({
     horizontal,
 }: ContainersLayerProps) {
     const ctx = useStateContext();
-    const SizeComponent = ctx.state.props.sizeComponentInternal;
     const columnWrapperStyle = ctx.columnWrapperStyle;
     const size = useContentSize();
     const [readyToRender, numColumns, otherAxisSize = 0] = useArr$(["readyToRender", "numColumns", "otherAxisSize"]);
@@ -75,26 +74,9 @@ const ContainersLayer = typedMemo(function ContainersLayer({
         }
     }
 
-    const content = <ContainerLayoutCoordinator>{children}</ContainerLayoutCoordinator>;
-    if (SizeComponent) {
-        // SizeComponent owns the scroll-axis size.
-        if (horizontal) delete style.width;
-        else delete style.height;
-        return (
-            <SizeComponent
-                horizontal={horizontal}
-                pointerEvents={isVisible ? undefined : "none"}
-                signalName="totalSize"
-                style={style}
-            >
-                {content}
-            </SizeComponent>
-        );
-    }
-
     return (
         <Animated.View pointerEvents={isVisible ? undefined : "none"} style={style}>
-            {content}
+            <ContainerLayoutCoordinator>{children}</ContainerLayoutCoordinator>
         </Animated.View>
     );
 });

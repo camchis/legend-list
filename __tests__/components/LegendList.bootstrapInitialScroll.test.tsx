@@ -674,7 +674,7 @@ describe("LegendList bootstrap initial scroll", () => {
     }
 
     for (const platform of ["web", "ios", "android"] as const) {
-        it(`settles every captured-ref scroll after unmount as unreachable on ${platform}`, async () => {
+        it(`settles every captured-ref scroll after unmount on ${platform}`, async () => {
             Platform.OS = platform;
             const { LegendList } = await import("../../src/components/LegendList?captured-ref-unmount");
             const data = [{ id: "row-0" }, { id: "row-1" }];
@@ -702,13 +702,12 @@ describe("LegendList bootstrap initial scroll", () => {
                 () => capturedRef.scrollIndexIntoView({ index: 1 }),
                 () => capturedRef.scrollItemIntoView({ item: data[1] }),
                 () => capturedRef.scrollToEnd(),
-                () => capturedRef.scrollElementIntoView({ element: { isConnected: true } as Element }),
             ];
             for (const request of requests) {
                 const results: unknown[] = [];
                 void request().then((result) => results.push(result));
                 await flushAsync();
-                expect(results).toEqual([{ reason: "unreachable" }]);
+                expect(results).toEqual([undefined]);
                 expect(state.pendingScrollResolve).toBeUndefined();
                 expect(state.pendingScrollToEnd).toBeUndefined();
                 expect(state.scrollingTo).toBeUndefined();

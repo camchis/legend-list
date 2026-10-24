@@ -63,7 +63,6 @@ describe("initialScrollLifecycle", () => {
             state.endFollowInterrupted = true;
             state.visibleContentAnchor = { key: "reader", offset: 20 };
             state.pendingEndMeasurements = new Set(["tail"]);
-            state.scrollElementTarget = { element: {} as Element };
 
             handleInitialScrollDataChange(ctx, {
                 dataLength: 25,
@@ -84,7 +83,6 @@ describe("initialScrollLifecycle", () => {
             expect(state.endFollowInterrupted).toBe(!didStartFreshData);
             expect(state.visibleContentAnchor).toEqual(didStartFreshData ? undefined : { key: "reader", offset: 20 });
             expect(state.pendingEndMeasurements).toEqual(didStartFreshData ? undefined : new Set(["tail"]));
-            expect(state.scrollElementTarget).toEqual(didStartFreshData ? undefined : { element: {} });
             expect(ctx.values.get("isFollowingEnd")).toBe(!didStartFreshData);
             // Releasing the old request must not leave scroll-gated transitions disabled.
             expect(ctx.values.get("isScrollActive")).toBe(!didStartFreshData);

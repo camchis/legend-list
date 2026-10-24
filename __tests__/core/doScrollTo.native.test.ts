@@ -130,7 +130,7 @@ describe("doScrollTo (native)", () => {
             expect(ctx.state.scrollingTo).toBeDefined();
             expect(resolve).not.toHaveBeenCalled();
             clock.advance(1900);
-            expect(resolve).toHaveBeenCalledWith({ reason: "unreachable" });
+            expect(resolve).toHaveBeenCalledWith();
             expect(ctx.state.scrollingTo).toBeUndefined();
         } finally {
             ctx.state.scheduledWork.dispose();
@@ -159,7 +159,7 @@ describe("doScrollTo (native)", () => {
         try {
             doScrollTo(ctx, { animated: true, offset: 100 });
             clock.advance(2000);
-            expect(resolve).toHaveBeenCalledWith({ reason: "unreachable" });
+            expect(resolve).toHaveBeenCalledWith();
             expect(ctx.state.scrollingTo).toBeUndefined();
             expect(clock.pendingTimerCount()).toBe(0);
         } finally {

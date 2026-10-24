@@ -115,6 +115,10 @@ export function useKeyboardChatComposerInset(
     return { contentInsetEndAdjustment, onComposerLayout };
 }
 
+// List refs also report an internal dataset epoch.
+const getDataEpoch = (list: NonNullable<KeyboardScrollToEndListRef["current"]>) =>
+    (list.getState?.() as (ReturnType<LegendListRef["getState"]> & { dataEpoch?: number }) | undefined)?.dataEpoch;
+
 export function useKeyboardScrollToEnd({ freeze: freezeProp, listRef }: UseKeyboardScrollToEndOptions) {
     const internalFreeze = useSharedValue(false);
     const freeze = freezeProp ?? internalFreeze;
@@ -125,7 +129,7 @@ export function useKeyboardScrollToEnd({ freeze: freezeProp, listRef }: UseKeybo
             const requestedList = listRef.current;
             if (!requestedList) return;
             const request = ++latestRequest.current;
-            const dataEpoch = requestedList.getState?.().dataEpoch;
+            const dataEpoch = getDataEpoch(requestedList);
             if (closeKeyboard) {
                 freeze.set(false);
                 await KeyboardController.dismiss();
@@ -134,7 +138,7 @@ export function useKeyboardScrollToEnd({ freeze: freezeProp, listRef }: UseKeybo
             if (
                 request !== latestRequest.current ||
                 currentList !== requestedList ||
-                currentList.getState?.().dataEpoch !== dataEpoch
+                getDataEpoch(currentList) !== dataEpoch
             )
                 return;
             freeze.set(true);

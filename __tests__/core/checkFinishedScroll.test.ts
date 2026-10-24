@@ -158,7 +158,7 @@ describe("checkFinishedScrollFallback", () => {
             expect(scrollTo).not.toHaveBeenCalled();
             expect(resolve).not.toHaveBeenCalled();
             interruptUserScroll(ctx);
-            expect(resolve).toHaveBeenCalledWith({ reason: "interrupted" });
+            expect(resolve).toHaveBeenCalledWith();
         } finally {
             date.mockRestore();
         }
@@ -258,7 +258,7 @@ describe("checkFinishedScrollFallback", () => {
     });
 
     for (const platform of ["ios", "android"] as const) {
-        it(`reports a stalled ${platform} end request as unreachable after bounded retries`, () => {
+        it(`settles a stalled ${platform} end request after bounded retries`, () => {
             Platform.OS = platform;
             const resolve = mock(() => {});
             const scrollTo = mock(() => {});
@@ -288,7 +288,7 @@ describe("checkFinishedScrollFallback", () => {
             checkFinishedScrollFallback(ctx);
             flushTimers(6);
             expect(scrollTo).toHaveBeenCalledTimes(5);
-            expect(resolve).toHaveBeenCalledWith({ reason: "unreachable" });
+            expect(resolve).toHaveBeenCalledWith();
             expect(ctx.state.scrollingTo).toBeUndefined();
         });
     }
@@ -345,7 +345,7 @@ describe("checkFinishedScrollFallback", () => {
         });
     }
 
-    it("reports an unaligned native request as unreachable after movement stops", () => {
+    it("settles an unaligned native request after movement stops", () => {
         Platform.OS = "ios";
         const resolveScroll = mock(() => {});
         const ctx = createMockContext(
@@ -369,7 +369,7 @@ describe("checkFinishedScrollFallback", () => {
         checkFinishedScrollFallback(ctx);
         flushTimers(1);
 
-        expect(resolveScroll).toHaveBeenCalledWith({ reason: "unreachable" });
+        expect(resolveScroll).toHaveBeenCalledWith();
         expect(ctx.state.pendingScrollResolve).toBeUndefined();
         expect(ctx.state.scrollingTo).toBeUndefined();
     });
@@ -410,7 +410,7 @@ describe("checkFinishedScrollFallback", () => {
                 expect(tracker.isCurrent(token!)).toBe(true);
                 expect(tracker.isWaitingToRun()).toBe(true);
             } else {
-                expect(resolve).toHaveBeenCalledWith({ reason: "unreachable" });
+                expect(resolve).toHaveBeenCalledWith();
                 expect(ctx.values.get("isFollowingEnd")).toBe(false);
             }
         });

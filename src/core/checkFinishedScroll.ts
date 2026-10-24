@@ -3,10 +3,9 @@ import { calculateOffsetForIndex } from "@/core/calculateOffsetForIndex";
 import { calculateOffsetWithOffsetPosition } from "@/core/calculateOffsetWithOffsetPosition";
 import { cancelScroll } from "@/core/cancelScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
-import { getObservedScrollOffset } from "@/core/emitMetrics";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { initialScrollCompletion, initialScrollWatchdog } from "@/core/initialScrollSession";
-import { getScrollElementTargetOffset } from "@/core/scrollElementIntoView";
+import { getObservedScrollOffset } from "@/core/observedScroll";
 import { clampScrollIndex } from "@/core/scrollToIndex";
 import { Platform } from "@/platform/Platform";
 import { getContentSize } from "@/state/getContentSize";
@@ -95,10 +94,6 @@ function isEndAlignedLastItemTarget(ctx: StateContext, scrollingTo: ActiveScroll
 }
 
 export function getCurrentTargetOffset(ctx: StateContext, scrollingTo: ActiveScrollTarget) {
-    if (Platform.OS === "web" && ctx.state.scrollElementTarget && !ctx.scrollRequestTracker?.isWaitingToRun()) {
-        const offset = getScrollElementTargetOffset(ctx);
-        if (offset !== "unreachable") return clampScrollOffset(ctx, offset, scrollingTo);
-    }
     const index = scrollingTo.isScrollToEnd
         ? ctx.state.props.data.length - 1
         : scrollingTo.index === undefined
@@ -279,7 +274,7 @@ export function checkFinishedScrollFallback(ctx: StateContext) {
                     !ctx.scrollRequestTracker?.isWaitingToRun() &&
                     !completionState.isAtResolvedTarget
                 ) {
-                    cancelScroll(ctx, false, "unreachable");
+                    cancelScroll(ctx, false);
                 } else {
                     finishScrollTo(ctx);
                 }

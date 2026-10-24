@@ -8,11 +8,9 @@ import type {
     AnchoredEndSpaceConfig,
     Insets,
     LayoutRectangle,
-    LegendListMetrics,
     LegendListPropsBase,
     LegendListRef,
     LegendListRenderItemProps,
-    LegendListScrollResult,
     NativeScrollEvent,
     NativeSyntheticEvent,
     ScrollIndexWithOffsetAndContentOffset,
@@ -44,7 +42,6 @@ export interface LegendListScrollerRef {
     isScrollInRange?(): boolean;
     getContentNode?(): unknown;
     getMaxScrollOffset?(): number;
-    isWindowScroll?(): boolean;
     getNativeScrollRef?(): unknown;
     getScrollEventTarget?(): ScrollEventTargetLike | null;
     getScrollableNode(): ScrollableNodeLike | null;
@@ -76,7 +73,7 @@ export interface ThresholdSnapshot {
 
 export type MaintainingScrollAtEndState = "pending-instant" | "pending-animated" | "instant" | "animated";
 
-export type ScrollResolve = (result?: LegendListScrollResult) => void;
+export type ScrollResolve = () => void;
 
 export interface ScrollTarget {
     averageSizeSnapshot?: Record<string, number>;
@@ -173,17 +170,11 @@ export type AverageSizes = Record<string, { num: number; avg: number }>;
 
 export type AnchoredEndSpaceOwner = "list" | "scroll";
 
+// Internal bridge for integrations, not part of the public list ref contract.
 // Keyboard integrations report occlusion separately from scroll-range insets.
-// This is an internal bridge, not part of the public list ref contract.
 export interface LegendListInternalRef extends LegendListRef {
-    /** Reveals a measured DOM element or text range inside a row. */
-    scrollElementIntoView(params: {
-        element: Element | Range;
-        viewPosition?: number;
-        animated?: boolean;
-        viewportMargin?: { top?: number; bottom?: number };
-    }): Promise<LegendListScrollResult>;
-
+    /** dataEpoch increments when a new dataset starts placement, including reuse of an earlier dataKey. */
+    getState(): ReturnType<LegendListRef["getState"]> & { dataEpoch: number };
     reportViewabilityInsetEndInternal?: (inset: number) => void;
 }
 
@@ -257,13 +248,9 @@ export interface InternalState {
     isMomentumScrolling?: boolean;
     // Content size at release while a user gesture awaits settlement.
     userScrollContentSize?: number;
-    activeSizeAnimations?: Set<string>;
-    resumeMaintainScrollAtEnd?: () => void;
     layoutAdjustmentEpoch?: number;
-    lastMetrics?: LegendListMetrics;
     endFollowInterrupted?: boolean;
     visibleContentAnchor?: { key: string; offset: number; sizeOnly?: true };
-    scrollElementTarget?: Parameters<LegendListInternalRef["scrollElementIntoView"]>[0];
     maintainingScrollAtEnd?: MaintainingScrollAtEndState;
     positionRecalculationStartIndex: number | undefined;
     mvcpAnchorLock?: {
@@ -376,7 +363,6 @@ export interface InternalState {
         onMomentumScrollBegin: LegendListPropsInternal["onMomentumScrollBegin"];
         onMomentumScrollEnd: LegendListPropsInternal["onMomentumScrollEnd"];
         onMetricsChange: LegendListPropsInternal["onMetricsChange"];
-        trackScrollMetrics: LegendListPropsInternal["trackScrollMetrics"];
         onUserScroll: LegendListPropsInternal["onUserScroll"];
         onScroll: LegendListPropsInternal["onScroll"];
         onScrollBeginDrag: LegendListPropsInternal["onScrollBeginDrag"];
@@ -390,7 +376,6 @@ export interface InternalState {
         renderItem: LegendListPropsInternal["renderItem"];
         scrollBuffer?: number;
         snapToIndices: number[] | undefined;
-        sizeComponentInternal: React.ComponentType<any> | undefined;
         positionComponentInternal: React.ComponentType<any> | undefined;
         stickyPositionComponentInternal: React.ComponentType<any> | undefined;
         stickyHeaderIndicesArr: number[];

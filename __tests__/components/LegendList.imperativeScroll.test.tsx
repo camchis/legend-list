@@ -112,7 +112,7 @@ describe("LegendList imperative scrolls", () => {
             });
             const ctx = lastListProps.scrollAdjustHandler.context as StateContext;
             const { state } = ctx;
-            if (queued) state.activeSizeAnimations = new Set(["totalSize"]);
+            if (queued) state.didColumnsChange = true;
             const settled = mock();
             const request = ref.current!.scrollToOffset({ animated: true, offset: 5000 });
             void request.then(settled);
@@ -133,9 +133,9 @@ describe("LegendList imperative scrolls", () => {
             expect(state.scheduledWork.has("imperativeScrollReady")).toBe(false);
             expect(ctx.scrollRequestTracker!.isWaitingToRun()).toBe(false);
             expect(peek$(ctx, "isScrollActive")).toBe(false);
-            expect(await request).toEqual({ reason: "unreachable" });
+            expect(await request).toBeUndefined();
 
-            state.activeSizeAnimations?.clear();
+            state.didColumnsChange = false;
             act(() => renderer!.update(list(false)));
             await flushAsync();
             expect(lastListProps.scrollAdjustHandler.context).toBe(ctx);
@@ -144,7 +144,7 @@ describe("LegendList imperative scrolls", () => {
             expect(state.scrollingTo).toBeUndefined();
             expect(peek$(ctx, "isScrollActive")).toBe(false);
             expect(settled).toHaveBeenCalledTimes(1);
-            expect(settled).toHaveBeenCalledWith({ reason: "unreachable" });
+            expect(settled).toHaveBeenCalledTimes(1);
         } finally {
             act(() => renderer?.unmount());
         }

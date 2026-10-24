@@ -372,14 +372,14 @@ describe.each([false, true])("native end following during momentum (screen reade
             );
         }
 
-        it.each([690, 400])("settles a captured-ref request while hidden as unreachable at %s", async (offset) => {
+        it.each([690, 400])("settles a captured-ref request while hidden at %s", async (offset) => {
             const list = await mountFollowingList({ echoCommands: true });
             const handle = list.ref.current!;
             try {
                 list.setSuspended(true);
                 await flushFrames();
                 expect(list.context().state.isUnmounted).toBe(true);
-                expect(await handle.scrollToOffset({ animated: false, offset })).toEqual({ reason: "unreachable" });
+                expect(await handle.scrollToOffset({ animated: false, offset })).toBeUndefined();
                 expect(list.writes).toEqual([]);
                 list.setSuspended(false);
                 await flushFrames();
@@ -547,7 +547,7 @@ describe.each([false, true])("native end following during momentum (screen reade
         }
     });
 
-    it("resolves an active end request as unreachable on unmount", async () => {
+    it("settles an active end request on unmount", async () => {
         const list = await mountFollowingList();
         list.scroll(200);
         let result: unknown = "pending";
@@ -560,69 +560,7 @@ describe.each([false, true])("native end following during momentum (screen reade
         expect(result).toBe("pending");
         list.unmount();
         await Promise.resolve();
-        expect(result).toEqual({ reason: "unreachable" });
-    });
-
-    for (const getter of ["getNativeScrollRef", "getAnimatableRef", "getScrollResponder"] as const) {
-        for (const animated of [false, true]) {
-            it(`releases following for an app command through ${getter} (animated: ${animated}) without wrapping internal dispatch`, async () => {
-                const list = await mountFollowingList();
-                try {
-                    const nativeRef = list.ref.current![getter]();
-                    expect(list.ref.current![getter]()).toBe(nativeRef);
-                    act(() => {
-                        void list.ref.current!.scrollToEnd({ animated: false });
-                    });
-                    await flushFrames();
-                    list.scroll(700);
-                    await flushFrames();
-                    expect(list.ref.current!.getState().isFollowingEnd).toBe(true);
-                    await list.append();
-                    expect(list.writes.some(({ y }) => y === 750)).toBe(true);
-                    list.scroll(750);
-                    await flushFrames();
-                    act(() => nativeRef.scrollTo({ animated, y: 0 }));
-                    if (animated) {
-                        // Native animations emit frames near the old end before leaving its threshold.
-                        for (const offset of [745, 740, 730]) {
-                            list.scroll(offset);
-                            await flushFrames();
-                            expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
-                        }
-                        list.writes.length = 0;
-                        await list.append();
-                        expect(list.writes).toEqual([]);
-                    }
-                    list.scroll(0);
-                    await flushFrames();
-                    expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
-                    list.writes.length = 0;
-                    await list.append();
-                    expect(list.writes).toEqual([]);
-                    expect(list.ref.current!.getState().scroll).toBe(0);
-                } finally {
-                    list.unmount();
-                }
-            });
-        }
-    }
-
-    it("rearms after an app command settles at the end", async () => {
-        const list = await mountFollowingList();
-        try {
-            act(() => list.ref.current!.getNativeScrollRef().scrollTo({ animated: true, y: 700 }));
-            list.scroll(700);
-            expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
-            await act(async () => {
-                await new Promise((resolve) => setTimeout(resolve, 600));
-            });
-            expect(list.ref.current!.getState().isFollowingEnd).toBe(true);
-            list.writes.length = 0;
-            await list.append();
-            expect(list.writes.some(({ y }) => y === 750)).toBe(true);
-        } finally {
-            list.unmount();
-        }
+        expect(result).toBeUndefined();
     });
 
     for (const queued of [true, false]) {
@@ -653,7 +591,7 @@ describe.each([false, true])("native end following during momentum (screen reade
                         interrupt();
                     }
                     await flushFrames();
-                    expect(result).toEqual({ reason: "interrupted" });
+                    expect(result).toBeUndefined();
                     expect(list.events).toContain(interruption === "status-bar" ? "scrollToTop" : "dragBegin");
                     expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
                     list.writes.length = 0;

@@ -110,13 +110,12 @@ export function updateScroll(
         if (Platform.OS === "web") {
             interruptUserScroll(ctx);
         } else {
-            // Commands through custom scrollers can bypass our native ref proxies.
+            // Native-ref and custom scroller commands have no list owner.
             interruptMaintainScrollAtEnd(ctx);
         }
     }
     if (isUserScrollEvent) {
         state.visibleContentAnchor = undefined;
-        state.scrollElementTarget = undefined;
         if (
             !state.isDragging &&
             !state.isMomentumScrolling &&

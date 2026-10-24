@@ -1,7 +1,6 @@
 import { calculateItemsInView } from "@/core/calculateItemsInView";
 import { invalidateFixedItemSizes } from "@/core/containerItemMetadata";
 import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
-import { scrollElementIntoView } from "@/core/scrollElementIntoView";
 import { shouldMaintainScrollAtEndOnDataChange } from "@/core/shouldMaintainScrollAtEndOnDataChange";
 import type { StateContext } from "@/state/state";
 import { checkThresholds } from "@/utils/checkThresholds";
@@ -32,8 +31,6 @@ export function checkResetContainers(
     }
 
     calculateItemsInView(ctx, { dataChanged: true, doMVCP: true });
-    if (state.scrollElementTarget)
-        state.scheduledWork.microtask(() => scrollElementIntoView(ctx), "scrollElementTarget");
 
     if (state.pendingEndMeasurements?.size) {
         const removedMeasurements = new Set(state.pendingEndMeasurements);

@@ -85,7 +85,7 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
                     if (ctx.scrollRequestTracker?.isWaitingToRun()) {
                         finishScrollTo(ctx);
                     } else {
-                        cancelScroll(ctx, false, "unreachable");
+                        cancelScroll(ctx, false);
                     }
                 } else {
                     retryLanding(ctx, targetToken, currentOffset, landingOffset);
@@ -114,7 +114,6 @@ function retryLanding(
 
     scrollTo(ctx, {
         ...target,
-        ...(ctx.state.scrollElementTarget ? { offset: landingOffset } : {}),
         animated:
             !!scrollingTo.animated &&
             !isLastRetry &&

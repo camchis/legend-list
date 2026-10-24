@@ -30,7 +30,6 @@ import { invalidateFixedItemSizes } from "@/core/containerItemMetadata";
 import { resetContainerLayoutReady } from "@/core/containerLayoutReady";
 import { doInitialAllocateContainers } from "@/core/doInitialAllocateContainers";
 import { doMaintainScrollAtEnd, finishMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
-import { emitMetrics } from "@/core/emitMetrics";
 import { getEndAlignedViewOffset } from "@/core/endOfContentTarget";
 import { clearPreservedInitialScrollTarget } from "@/core/finishInitialScroll";
 import { handleLayout } from "@/core/handleLayout";
@@ -61,8 +60,8 @@ import { subscribeScreenReader } from "@/platform/screenReader";
 import type { LooseScrollView, LooseScrollViewProps, LooseView, ViewStyle } from "@/platform/scrollview-types";
 import { useStickyScrollHandler } from "@/platform/useStickyScrollHandler";
 import { getContentSize } from "@/state/getContentSize";
-import { peek$, StateProvider, set$, useStateContext } from "@/state/state";
-import type { LegendListRef, LegendListRenderItemProps } from "@/types.base";
+import { listen$, peek$, StateProvider, set$, useStateContext } from "@/state/state";
+import type { LegendListMetrics, LegendListRef, LegendListRenderItemProps } from "@/types.base";
 import type {
     AnchoredEndSpaceOwner,
     InternalState,
@@ -179,7 +178,6 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
         onEndReachedThreshold = 0.5,
         onItemSizeChanged,
         onMetricsChange,
-        trackScrollMetrics,
         onUserScroll,
         onLayout: onLayoutProp,
         onLoad,
@@ -216,14 +214,12 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
     const animatedPropsInternal = (props as any).animatedPropsInternal as StylesAsSharedValue<LooseScrollViewProps>;
     const anchoredEndSpaceOwner =
         ((props as any).anchoredEndSpaceOwnerInternal as AnchoredEndSpaceOwner | undefined) ?? "list";
-    const sizeComponentInternal = (props as any).sizeComponentInternal as React.ComponentType<any> | undefined;
     const positionComponentInternal = (props as any).positionComponentInternal as React.ComponentType<any> | undefined;
     const stickyPositionComponentInternal = (props as any).stickyPositionComponentInternal as
         | React.ComponentType<any>
         | undefined;
     const {
         anchoredEndSpaceOwnerInternal: _anchoredEndSpaceOwnerInternal,
-        sizeComponentInternal: _sizeComponentInternal,
         positionComponentInternal: _positionComponentInternal,
         stickyPositionComponentInternal: _stickyPositionComponentInternal,
         ...restProps
@@ -455,7 +451,6 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
             ctx.scrollToEnd = (options) => scrollToEnd(ctx, options);
             internalState.triggerCalculateItemsInView = (params) => calculateItemsInView(ctx, params);
             internalState.reprocessCurrentScroll = () => updateScroll(ctx, internalState.scroll, true);
-            internalState.resumeMaintainScrollAtEnd = () => doMaintainScrollAtEnd(ctx);
 
             set$(ctx, "maintainVisibleContentPosition", maintainVisibleContentPositionConfig);
             set$(ctx, "extraData", extraData);
@@ -567,7 +562,6 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
         recycleItems: !!recycleItems,
         renderItem: renderItem!,
         rtl,
-        sizeComponentInternal,
         snapToIndices,
         stickyHeaderIndicesArr: stickyHeaderIndices ?? [],
         stickyHeaderIndicesSet: useMemo(() => new Set(stickyHeaderIndices ?? []), [stickyHeaderIndices?.join(",")]),
@@ -576,7 +570,6 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
         stylePaddingLeft: stylePaddingLeftState,
         stylePaddingRight: stylePaddingRightState,
         stylePaddingTop: stylePaddingTopState,
-        trackScrollMetrics,
         useWindowScroll: useWindowScrollResolved,
     };
 
@@ -652,7 +645,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
             state.isUnmounted = true;
             state.maintainingScrollAtEnd = undefined;
             state.pendingMaintainScrollAtEnd = false;
-            cancelImperativeScroll(state, "unreachable");
+            cancelImperativeScroll(state);
             set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
             cancelBootstrapInitialScrollFrame(state);
             state.scheduledWork.dispose();
@@ -873,14 +866,40 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
         }
     }, [extraData, hasOverrideItemLayout, numColumnsProp]);
 
-    useLayoutEffect(() => {
-        if (!sizeComponentInternal && state.pendingMaintainScrollAtEnd) doMaintainScrollAtEnd(ctx);
-    }, [sizeComponentInternal]);
+    useEffect(() => {
+        if (!onMetricsChange) {
+            return;
+        }
 
-    useLayoutEffect(() => {
-        state.lastMetrics = undefined;
-        emitMetrics(ctx);
-    }, [ctx, !!onMetricsChange, trackScrollMetrics]);
+        let lastMetrics: LegendListMetrics | undefined;
+
+        // Read the latest callback so an inline callback does not resubscribe and re-emit every render.
+        const emitMetrics = () => {
+            const metrics: LegendListMetrics = {
+                footerSize: peek$(ctx, "footerSize") || 0,
+                headerSize: peek$(ctx, "headerSize") || 0,
+            };
+
+            if (
+                !lastMetrics ||
+                metrics.headerSize !== lastMetrics.headerSize ||
+                metrics.footerSize !== lastMetrics.footerSize
+            ) {
+                lastMetrics = metrics;
+                state.props.onMetricsChange?.(metrics);
+            }
+        };
+
+        emitMetrics();
+
+        const unsubscribe = [listen$(ctx, "headerSize", emitMetrics), listen$(ctx, "footerSize", emitMetrics)];
+
+        return () => {
+            for (const unsub of unsubscribe) {
+                unsub();
+            }
+        };
+    }, [ctx, !!onMetricsChange]);
 
     useEffect(() => {
         const viewability = setupViewability({

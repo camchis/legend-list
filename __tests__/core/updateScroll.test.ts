@@ -925,19 +925,15 @@ describe("updateScroll user scroll ownership", () => {
         }
     });
 
-    it("releases the reader anchor and DOM target only for user scroll events", () => {
+    it("releases the reader anchor only for user scroll events", () => {
         const { ctx } = createUserScrollContext();
         const anchor = { key: "reader", offset: 20 };
-        const target = { element: {} as Element };
         ctx.state.visibleContentAnchor = anchor;
-        ctx.state.scrollElementTarget = target;
 
         updateScroll(ctx, 550, true);
         expect(ctx.state.visibleContentAnchor).toBe(anchor);
-        expect(ctx.state.scrollElementTarget).toBe(target);
 
         updateScroll(ctx, 600, true, { fromNativeScrollEvent: true });
         expect(ctx.state.visibleContentAnchor).toBeUndefined();
-        expect(ctx.state.scrollElementTarget).toBeUndefined();
     });
 });

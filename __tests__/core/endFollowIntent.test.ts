@@ -8,17 +8,13 @@ import { checkResetContainers } from "../../src/core/checkResetContainers";
 import * as follow from "../../src/core/doMaintainScrollAtEnd";
 import * as platformScroll from "../../src/core/doScrollTo";
 import { doScrollTo as doNativeScrollTo } from "../../src/core/doScrollTo.native";
-import { emitMetrics } from "../../src/core/emitMetrics";
 import { finishInitialScroll } from "../../src/core/finishInitialScroll";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import { dispatchInitialScroll } from "../../src/core/initialScroll";
 import { handleInitialScrollDataChange } from "../../src/core/initialScrollLifecycle";
 import { resetLayoutCachesForDataChange } from "../../src/core/resetLayoutCachesForDataChange";
-import { scrollElementIntoView } from "../../src/core/scrollElementIntoView";
 import { getScrollRequestTracker } from "../../src/core/scrollRequestTracker";
-import * as scrollModule from "../../src/core/scrollTo";
 import { scrollToEnd } from "../../src/core/scrollToEnd";
-import { setFooterSize, setHeaderSize } from "../../src/core/updateContentMetrics";
 import { updateItemPositions } from "../../src/core/updateItemPositions";
 import { updateItemSizes, updateOneItemSize } from "../../src/core/updateItemSizes";
 import { updateScroll } from "../../src/core/updateScroll";
@@ -40,9 +36,8 @@ afterEach(() => {
 });
 
 describe("end follow intent", () => {
-    it("emits metrics when the gesture stall timer rearms end following", () => {
+    it("rearms end following when the gesture stall timer fires", () => {
         const clock = installFakeClock();
-        const onMetricsChange = mock(() => {});
         const ctx = createMockContext(
             { isFollowingEnd: false, isWithinMaintainScrollAtEndThreshold: true, totalSize: 1000 },
             {
@@ -51,7 +46,7 @@ describe("end follow intent", () => {
                 endFollowInterrupted: true,
                 isMomentumScrolling: true,
                 lastNativeScrollTime: 0,
-                props: { data: [], maintainScrollAtEnd: {}, onMetricsChange, trackScrollMetrics: true },
+                props: { data: [], maintainScrollAtEnd: {} },
                 scroll: 700,
                 scrollLength: 300,
                 scrollPending: 700,
@@ -59,12 +54,9 @@ describe("end follow intent", () => {
             },
         );
         try {
-            emitMetrics(ctx);
-            expect(onMetricsChange).toHaveBeenLastCalledWith(expect.objectContaining({ isFollowingEnd: false }));
             armUserScrollSettle(ctx);
             clock.advance(500);
             expect(ctx.values.get("isFollowingEnd")).toBe(true);
-            expect(onMetricsChange).toHaveBeenLastCalledWith(expect.objectContaining({ isFollowingEnd: true }));
         } finally {
             ctx.state.scheduledWork.dispose();
             clock.restore();
@@ -184,12 +176,11 @@ describe("canonical scroll geometry", () => {
 
     for (const hasSynchronousGetter of [true, false]) {
         it(`reports observed end distance even when a managed target optimistically reaches the end (getter: ${hasSynchronousGetter})`, () => {
-            const metrics = mock(() => {});
             const ctx = createMockContext(
                 { totalSize: 1000 },
                 {
                     lastNativeScroll: 100,
-                    props: { data: ["row"], onMetricsChange: metrics, trackScrollMetrics: true },
+                    props: { data: ["row"] },
                     queuedInitialLayout: true,
                     refScroller: {
                         current: hasSynchronousGetter ? { getCurrentScrollOffset: () => 300 } : null,
@@ -201,32 +192,26 @@ describe("canonical scroll geometry", () => {
             const expectedDistance = hasSynchronousGetter ? 500 : 700;
             updateScroll(ctx, 800, true, { markHasScrolled: false });
             expect(createImperativeHandle(ctx).getState().distanceFromEnd).toBe(expectedDistance);
-            expect(metrics).toHaveBeenLastCalledWith(expect.objectContaining({ distanceFromEnd: expectedDistance }));
         });
     }
 
     it("reports the remaining inset until the physical end is reached", () => {
-        const metrics = mock(() => {});
         const ctx = createMockContext(
             { totalSize: 500 },
             {
-                props: {
-                    contentInset: { bottom: 100, left: 0, right: 0, top: 0 },
-                    data: ["a"],
-                    onMetricsChange: metrics,
-                    trackScrollMetrics: true,
-                },
+                props: { contentInset: { bottom: 100, left: 0, right: 0, top: 0 }, data: ["a"] },
                 queuedInitialLayout: true,
                 scroll: 0,
                 scrollLength: 200,
             },
         );
+        const handle = createImperativeHandle(ctx);
         updateScroll(ctx, 300, true);
-        expect(metrics).toHaveBeenLastCalledWith(
+        expect(handle.getState()).toEqual(
             expect.objectContaining({ contentLength: 600, distanceFromEnd: 100, isAtEnd: false, scroll: 300 }),
         );
         updateScroll(ctx, 400, true);
-        expect(metrics).toHaveBeenLastCalledWith(
+        expect(handle.getState()).toEqual(
             expect.objectContaining({ contentLength: 600, distanceFromEnd: 0, isAtEnd: true, scroll: 400 }),
         );
     });
@@ -305,135 +290,6 @@ describe("canonical scroll geometry", () => {
     });
 });
 
-describe("measured DOM navigation", () => {
-    it("aligns an already visible citation at the requested viewport position", async () => {
-        const node = {
-            clientHeight: 400,
-            clientLeft: 0,
-            clientTop: 0,
-            clientWidth: 200,
-            getBoundingClientRect: () => ({ bottom: 500, left: 0, top: 100 }),
-        };
-        const element = { getBoundingClientRect: () => ({ bottom: 220, height: 20, top: 200 }), isConnected: true };
-        const ctx = createMockContext(
-            {},
-            {
-                props: { data: ["row"] },
-                refScroller: { current: { getScrollableNode: () => node } } as any,
-                scroll: 100,
-            },
-        );
-        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation(() => {});
-        await createImperativeHandle(ctx).scrollElementIntoView({
-            element: element as any,
-            viewPosition: 0,
-            viewportMargin: { top: 40 },
-        });
-        expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 160 });
-    });
-
-    function setupElementTarget(rect: { bottom: number; height: number; top: number }, isConnected = true) {
-        const node = {
-            clientHeight: 200,
-            clientLeft: 0,
-            clientTop: 0,
-            clientWidth: 200,
-            getBoundingClientRect: () => ({ bottom: 200, left: 0, top: 0 }),
-        };
-        const ctx = createMockContext(
-            { totalSize: 100 },
-            {
-                didContainersLayout: true,
-                didFinishInitialScroll: true,
-                indexByKey: new Map([["a", 0]]),
-                positions: [0],
-                previousData: ["a"],
-                props: { data: ["a"], keyExtractor: (item) => item },
-                refScroller: { current: { getCurrentScrollOffset: () => 40, getScrollableNode: () => node } } as any,
-                scrollLength: 200,
-                sizes: new Map([["a", 100]]),
-                sizesKnown: new Map([["a", 100]]),
-            },
-        );
-        const element = { getBoundingClientRect: () => rect, isConnected };
-        ctx.state.scrollElementTarget = { element: element as any };
-        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation(() => {});
-        return { ctx, element, scroll };
-    }
-
-    it("realigns the DOM target after a row measurement and after a data reset", async () => {
-        const { ctx, scroll } = setupElementTarget({ bottom: 320, height: 20, top: 300 });
-        updateItemSizes(ctx, { itemKey: "a", size: { height: 140, width: 200 } });
-        expect(scroll).not.toHaveBeenCalled();
-        await Promise.resolve();
-        expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 160 });
-        checkResetContainers(ctx, ctx.state.props.data);
-        await Promise.resolve();
-        expect(scroll).toHaveBeenCalledTimes(2);
-    });
-
-    it("releases a disconnected DOM target and ignores subpixel deltas", () => {
-        const disconnected = setupElementTarget({ bottom: 320, height: 20, top: 300 }, false);
-        expect(scrollElementIntoView(disconnected.ctx)).toBe("unreachable");
-        expect(disconnected.ctx.state.scrollElementTarget).toBeUndefined();
-        expect(disconnected.scroll).not.toHaveBeenCalled();
-        mock.restore();
-
-        const aligned = setupElementTarget({ bottom: 200.5, height: 20, top: 180.5 });
-        expect(scrollElementIntoView(aligned.ctx)).toBe(false);
-        expect(aligned.scroll).not.toHaveBeenCalled();
-    });
-
-    it.each([false, true])("reveals a horizontally displaced element (rtl=%s)", (rtl) => {
-        const node = {
-            clientHeight: 200,
-            clientLeft: 0,
-            clientTop: 0,
-            clientWidth: 200,
-            getBoundingClientRect: () => ({ bottom: 200, left: 0, right: 200, top: 0 }),
-        };
-        const element = {
-            getBoundingClientRect: () => ({
-                bottom: 20,
-                height: 20,
-                left: rtl ? -120 : 300,
-                right: rtl ? -100 : 320,
-                top: 0,
-                width: 20,
-            }),
-            isConnected: true,
-        };
-        const ctx = createMockContext(
-            {},
-            {
-                props: { horizontal: true, rtl },
-                refScroller: { current: { getScrollableNode: () => node } } as any,
-                scroll: 40,
-                scrollElementTarget: { element: element as any },
-            },
-        );
-        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation(() => {});
-        try {
-            expect(scrollElementIntoView(ctx)).toBe(true);
-            expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 160 });
-        } finally {
-            scroll.mockRestore();
-        }
-    });
-
-    it("scrolls a connected Range target into view", () => {
-        const { ctx, scroll } = setupElementTarget({ bottom: 320, height: 20, top: 300 });
-        ctx.state.scrollElementTarget = {
-            element: {
-                commonAncestorContainer: { isConnected: true },
-                getBoundingClientRect: () => ({ bottom: 320, height: 20, top: 300 }),
-            } as any,
-        };
-        expect(scrollElementIntoView(ctx)).toBe(true);
-        expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 160 });
-    });
-});
-
 describe("scroll ownership boundaries", () => {
     it("stops an active animation but avoids writing idle or native drag offsets", () => {
         const scrollTo = mock(() => {});
@@ -478,18 +334,15 @@ describe("scroll ownership boundaries", () => {
         }
     });
 
-    it("releases pending end measurements and DOM targets only for explicit requests", async () => {
+    it("releases pending end measurements only for explicit requests", async () => {
         const ctx = createMockContext({}, { props: { data: ["a"] } });
         const pendingEndMeasurements = new Set(["a"]);
-        const scrollElementTarget = { element: {} as Element };
-        Object.assign(ctx.state, { pendingEndMeasurements, scrollElementTarget });
+        Object.assign(ctx.state, { pendingEndMeasurements });
         const tracker = getScrollRequestTracker(ctx);
         await tracker.runNowIfIdle(() => false);
         expect(ctx.state.pendingEndMeasurements).toBe(pendingEndMeasurements);
-        expect(ctx.state.scrollElementTarget).toBe(scrollElementTarget);
         tracker.start(() => {});
         expect(ctx.state.pendingEndMeasurements).toBeUndefined();
-        expect(ctx.state.scrollElementTarget).toBeUndefined();
     });
 
     for (const isDragging of [false, true]) {
@@ -510,68 +363,6 @@ describe("scroll ownership boundaries", () => {
         });
     }
 
-    it("reports header, footer and out-of-range row size changes without scrolling", () => {
-        const metrics = mock(() => {});
-        const ctx = createMockContext(
-            { totalSize: 100 },
-            {
-                didContainersLayout: true,
-                didFinishInitialScroll: true,
-                endBuffered: 2,
-                indexByKey: new Map([["a", 0]]),
-                positions: [0],
-                props: {
-                    data: ["a"],
-                    keyExtractor: (item) => item,
-                    onMetricsChange: metrics,
-                    trackScrollMetrics: true,
-                },
-                queuedInitialLayout: true,
-                scrollLength: 200,
-                sizes: new Map([["a", 100]]),
-                sizesKnown: new Map([["a", 100]]),
-                startBuffered: 2,
-            },
-        );
-        setHeaderSize(ctx, 20);
-        expect(metrics).toHaveBeenLastCalledWith(expect.objectContaining({ contentLength: 120, headerSize: 20 }));
-        setFooterSize(ctx, 30);
-        expect(metrics).toHaveBeenLastCalledWith(expect.objectContaining({ contentLength: 150, footerSize: 30 }));
-        updateItemSizes(ctx, { itemKey: "a", size: { height: 170, width: 200 } });
-        expect(metrics).toHaveBeenLastCalledWith(expect.objectContaining({ contentLength: 220 }));
-    });
-
-    it("reports only header and footer changes unless scroll metrics are tracked", () => {
-        for (const trackScrollMetrics of [false, true]) {
-            const metrics = mock(() => {});
-            const ctx = createMockContext(
-                { totalSize: 1000 },
-                {
-                    didContainersLayout: true,
-                    didFinishInitialScroll: true,
-                    endBuffered: 2,
-                    indexByKey: new Map([["a", 0]]),
-                    positions: [0],
-                    props: { data: ["a"], keyExtractor: (item) => item, onMetricsChange: metrics, trackScrollMetrics },
-                    queuedInitialLayout: true,
-                    scroll: 0,
-                    scrollLength: 200,
-                    sizes: new Map([["a", 100]]),
-                    sizesKnown: new Map([["a", 100]]),
-                    startBuffered: 2,
-                },
-            );
-            setHeaderSize(ctx, 20);
-            expect(metrics).toHaveBeenCalledTimes(1);
-            for (const offset of [10, 50, 100]) updateScroll(ctx, offset, true, { fromNativeScrollEvent: true });
-            updateItemSizes(ctx, { itemKey: "a", size: { height: 170, width: 200 } });
-            expect(metrics).toHaveBeenCalledTimes(trackScrollMetrics ? 5 : 1);
-            setFooterSize(ctx, 30);
-            expect(metrics).toHaveBeenCalledTimes(trackScrollMetrics ? 6 : 2);
-            expect(metrics).toHaveBeenLastCalledWith(expect.objectContaining({ footerSize: 30, headerSize: 20 }));
-        }
-    });
-
     it("keeps following across an observed browser shrink clamp and interrupts real navigation below that clamp", () => {
         Platform.OS = "web";
         const ctx = createMockContext(
@@ -588,62 +379,6 @@ describe("scroll ownership boundaries", () => {
         expect(createImperativeHandle(ctx).getState().isFollowingEnd).toBe(true);
         updateScroll(ctx, 550, true, { fromNativeScrollEvent: true });
         expect(createImperativeHandle(ctx).getState().isFollowingEnd).toBe(false);
-    });
-
-    it("reveals an element below the window viewport even within document bounds", () => {
-        const previousHeight = window.innerHeight;
-        window.innerHeight = 600;
-        const node = { getBoundingClientRect: () => ({ bottom: 3000, top: -400 }) };
-        const element = { getBoundingClientRect: () => ({ bottom: 820, height: 20, top: 800 }), isConnected: true };
-        const ctx = createMockContext(
-            {},
-            {
-                refScroller: {
-                    current: {
-                        getCurrentScrollOffset: () => 400,
-                        getScrollableNode: () => node,
-                        isWindowScroll: () => true,
-                    },
-                } as any,
-                scrollElementTarget: { element: element as any, viewportMargin: { bottom: 20 } },
-            },
-        );
-        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation(() => {});
-        try {
-            expect(scrollElementIntoView(ctx)).toBe(true);
-            expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 640 });
-        } finally {
-            window.innerHeight = previousHeight;
-            scroll.mockRestore();
-        }
-    });
-
-    it("releases the measured DOM target when its owned request settles", async () => {
-        const node = {
-            clientHeight: 200,
-            clientLeft: 0,
-            clientTop: 0,
-            clientWidth: 200,
-            getBoundingClientRect: () => ({ bottom: 200, left: 0, top: 0 }),
-        };
-        const element = { getBoundingClientRect: () => ({ bottom: 320, height: 20, top: 300 }), isConnected: true };
-        const ctx = createMockContext(
-            {},
-            {
-                props: { data: ["a"] },
-                refScroller: { current: { getCurrentScrollOffset: () => 40, getScrollableNode: () => node } } as any,
-                scroll: 0,
-            },
-        );
-        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation((targetCtx, params) => {
-            targetCtx.state.scrollingTo = { offset: params.offset };
-        });
-        const request = createImperativeHandle(ctx).scrollElementIntoView({ element: element as any });
-        expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 160 });
-        expect(ctx.state.scrollElementTarget).toBeDefined();
-        finishScrollTo(ctx);
-        await request;
-        expect(ctx.state.scrollElementTarget).toBeUndefined();
     });
 });
 
@@ -831,7 +566,7 @@ describe("keyed navigation through layout changes", () => {
                 stylePaddingEnd: 0,
                 useBootstrapInitialScroll: false,
             });
-            expect(await promise).toEqual({ reason: "unreachable" });
+            expect(await promise).toBeUndefined();
             expect(ctx.state.pendingScrollResolve).toBeUndefined();
             expect(ctx.state.scheduledWork.has("imperativeScrollReady")).toBe(false);
             frames.shift()?.(0);

@@ -338,17 +338,9 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
     onReady?: () => void;
 
     /**
-     * Called when the header or footer size changes. Set `trackScrollMetrics` to also call it when any other
-     * metric changes, including on scroll.
+     * Called when list layout metrics change.
      */
     onMetricsChange?: (metrics: LegendListMetrics) => void;
-
-    /**
-     * Calls `onMetricsChange` whenever any metric changes, including `scroll`, `distanceFromEnd`, `contentLength`,
-     * `scrollLength`, `isAtEnd` and `isFollowingEnd`. These can change on every scroll frame.
-     * @default false
-     */
-    trackScrollMetrics?: boolean;
 
     /**
      * Called when the first visible item changes. This is emitted from the core range calculation and is cheaper than
@@ -528,16 +520,6 @@ export interface ScrollToEndOptions {
     viewOffset?: number;
 }
 
-/**
- * Resolved value of imperative scroll promises. Undefined means the list landed on the target.
- * scrollToIndex and scrollToOffset clamp out-of-range targets to reachable indexes/offsets and
- * resolve as landed. Index-based navigation and scrollToEnd on empty data resolve as unreachable.
- * A reason means it was interrupted by user input, superseded by cancellation/replacement,
- * or unreachable because the target cannot be reached, the data was replaced, or the list unmounted.
- * The void member keeps existing `Promise<void>` implementations assignable.
- */
-export type LegendListScrollResult = { reason: "interrupted" | "superseded" | "unreachable" } | void;
-
 export interface AnchoredEndSpaceConfig {
     /** Index of the item whose row should remain anchored when trailing space is added. */
     anchorIndex: number;
@@ -602,12 +584,6 @@ export interface ColumnWrapperStyle {
 }
 
 export interface LegendListMetrics {
-    contentLength: number;
-    scrollLength: number;
-    scroll: number;
-    distanceFromEnd: number;
-    isAtEnd: boolean;
-    isFollowingEnd: boolean;
     headerSize: number;
     footerSize: number;
 }
@@ -633,8 +609,6 @@ export type LegendListState = {
     contentLength: number;
     data: readonly any[];
     dataKey?: Key;
-    /** Increments when a new dataset starts placement, including reuse of an earlier dataKey. */
-    dataEpoch: number;
     elementAtIndex: (index: number) => any;
     end: number;
     endBuffered: number;
@@ -676,13 +650,8 @@ export type LegendListState = {
 export type LegendListRef = {
     /** Cancels queued and active scrolling, settles its promise, and stops at the observed offset. */
     cancelScroll(): void;
-    /** Scrolls by stable item identity through prepends; resolves unreachable if the key is missing or removed. */
-    scrollToKey(params: {
-        key: string;
-        animated?: boolean;
-        viewOffset?: number;
-        viewPosition?: number;
-    }): Promise<LegendListScrollResult>;
+    /** Scrolls by stable item identity through prepends; resolves without scrolling if the key is missing or removed. */
+    scrollToKey(params: { key: string; animated?: boolean; viewOffset?: number; viewPosition?: number }): Promise<void>;
     /** Captures the first visible item and its viewport offset after initial placement is ready. */
     getScrollAnchor(): { key: string; offset: number } | undefined;
     /** Keeps a visible item at its current viewport position through subsequent layout changes. */
@@ -700,14 +669,12 @@ export type LegendListRef = {
     flashScrollIndicators(): void;
 
     /**
-     * Returns a stable wrapper around the native ScrollView reference.
-     * Scroll commands release end following; wrapper identity differs from the native instance.
+     * Returns the native ScrollView component reference.
      */
     getNativeScrollRef(): any;
 
     /**
-     * Returns a stable wrapper around the animatable scroll component reference.
-     * Scroll commands release end following; wrapper identity differs from the native instance.
+     * Returns the underlying animatable scroll component reference.
      */
     getAnimatableRef(): any;
 
@@ -717,8 +684,7 @@ export type LegendListRef = {
     getScrollableNode(): any;
 
     /**
-     * Returns a stable wrapper around the ScrollResponderMixin for advanced scroll handling.
-     * Scroll commands release end following; wrapper identity differs from the native instance.
+     * Returns the ScrollResponderMixin for advanced scroll handling.
      */
     getScrollResponder(): any;
 
@@ -738,12 +704,13 @@ export type LegendListRef = {
      * @param params - Parameters for scrolling.
      * @param params.animated - If true, animates the scroll. Default: true.
      * @param params.index - The index to scroll to.
+     * @param params.viewportMargin - Space to keep clear at the start and end of the viewport along the scroll axis.
      */
     scrollIndexIntoView(params: {
         animated?: boolean | undefined;
         index: number;
-        viewportMargin?: { top?: number; bottom?: number };
-    }): Promise<LegendListScrollResult>;
+        viewportMargin?: { start?: number; end?: number };
+    }): Promise<void>;
 
     /**
      * Scrolls a specific index into view.
@@ -751,7 +718,7 @@ export type LegendListRef = {
      * @param params.animated - If true, animates the scroll. Default: true.
      * @param params.item - The item to scroll to.
      */
-    scrollItemIntoView(params: { animated?: boolean | undefined; item: any }): Promise<LegendListScrollResult>;
+    scrollItemIntoView(params: { animated?: boolean | undefined; item: any }): Promise<void>;
 
     /**
      * Scrolls to the end of the list.
@@ -759,7 +726,7 @@ export type LegendListRef = {
      * @param options.animated - If true, animates the scroll. Default: true.
      * @param options.viewOffset - Offset from the target position.
      */
-    scrollToEnd(options?: ScrollToEndOptions): Promise<LegendListScrollResult>;
+    scrollToEnd(options?: ScrollToEndOptions): Promise<void>;
 
     /**
      * Scrolls to a specific index in the list.
@@ -776,7 +743,7 @@ export type LegendListRef = {
         viewPosition?: number | undefined;
         /** Alignment used only when the item exceeds the viewport. Omit to preserve viewPosition. */
         viewPositionFallback?: "start" | "end";
-    }): Promise<LegendListScrollResult>;
+    }): Promise<void>;
 
     /**
      * Scrolls to a specific item in the list.
@@ -793,7 +760,7 @@ export type LegendListRef = {
         viewPosition?: number | undefined;
         /** Alignment used only when the item exceeds the viewport. Omit to preserve viewPosition. */
         viewPositionFallback?: "start" | "end";
-    }): Promise<LegendListScrollResult>;
+    }): Promise<void>;
 
     /**
      * Scrolls to a specific offset in pixels.
@@ -801,7 +768,7 @@ export type LegendListRef = {
      * @param params.offset - The pixel offset to scroll to.
      * @param params.animated - If true, animates the scroll. Default: true.
      */
-    scrollToOffset(params: { offset: number; animated?: boolean | undefined }): Promise<LegendListScrollResult>;
+    scrollToOffset(params: { offset: number; animated?: boolean | undefined }): Promise<void>;
 
     /**
      * Sets a measured item size and recalculates list positions as needed.

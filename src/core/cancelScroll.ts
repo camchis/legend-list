@@ -1,32 +1,26 @@
 import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
 import { interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
-import { getObservedScrollOffset } from "@/core/emitMetrics";
 import { clearPreservedInitialScrollTarget, supersedeInitialScroll } from "@/core/finishInitialScroll";
+import { getObservedScrollOffset } from "@/core/observedScroll";
 import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";
 import { getContentSize } from "@/state/getContentSize";
 import { peek$, type StateContext, set$ } from "@/state/state";
-import type { LegendListScrollResult } from "@/types.base";
 import { toNativeHorizontalOffset } from "@/utils/rtl";
 
-export function cancelScroll(
-    ctx: StateContext,
-    stopAnimation = true,
-    reason: Exclude<LegendListScrollResult, void>["reason"] = "superseded",
-) {
+export function cancelScroll(ctx: StateContext, stopAnimation = true) {
     const { state } = ctx;
     const wasAnimating = !!state.scrollingTo?.animated;
     const scroller = state.refScroller.current;
     // Without a native observation, scrollPending has not yet absorbed deferred adjustments.
     const observed = getObservedScrollOffset(ctx, peek$(ctx, "scrollAdjustPending") ? state.scrollPending : undefined);
     ctx.scrollRequestTracker?.cancel();
-    interruptMaintainScrollAtEnd(ctx, reason);
-    cancelImperativeScroll(state, reason);
+    interruptMaintainScrollAtEnd(ctx);
+    cancelImperativeScroll(state);
     supersedeInitialScroll(ctx);
     clearPreservedInitialScrollTarget(state);
     state.pendingEndMeasurements = undefined;
     state.visibleContentAnchor = undefined;
-    state.scrollElementTarget = undefined;
     set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
     state.scrollPending = observed;
     // Deferred adjustments are not applied natively yet, so the observed offset is current even
@@ -54,15 +48,14 @@ export function cancelScroll(
 
 export function interruptUserScroll(ctx: StateContext) {
     if (ctx.state.scrollingTo || (ctx.state.initialScroll && !ctx.state.didFinishInitialScroll)) {
-        cancelScroll(ctx, Platform.OS === "web", "interrupted");
+        cancelScroll(ctx, Platform.OS === "web");
     } else {
         ctx.scrollRequestTracker?.cancel();
         interruptMaintainScrollAtEnd(ctx);
-        cancelImperativeScroll(ctx.state, "interrupted");
+        cancelImperativeScroll(ctx.state);
         clearPreservedInitialScrollTarget(ctx.state);
         ctx.state.pendingEndMeasurements = undefined;
         ctx.state.visibleContentAnchor = undefined;
-        ctx.state.scrollElementTarget = undefined;
         set$(ctx, "isScrollActive", !!ctx.state.isDragging || !!ctx.state.isMomentumScrolling);
     }
 }

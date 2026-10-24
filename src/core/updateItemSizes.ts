@@ -2,7 +2,6 @@ import { schedulePreservedEndAnchorCorrection } from "@/core/bootstrapInitialScr
 import { calculateItemsInView } from "@/core/calculateItemsInView";
 import { resolveContainerItemMetadata } from "@/core/containerItemMetadata";
 import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
-import { scrollElementIntoView } from "@/core/scrollElementIntoView";
 import { setSize } from "@/core/setSize";
 import { maybeUpdateAnchoredEndSpace } from "@/core/updateAnchoredEndSpace";
 import { Platform } from "@/platform/Platform";
@@ -105,8 +104,6 @@ function flushItemSizeUpdates(ctx: StateContext, result: ItemSizeUpdateResult) {
     }
     if (result.didChange) {
         maybeUpdateAnchoredEndSpace(ctx);
-        if (state.scrollElementTarget)
-            state.scheduledWork.microtask(() => scrollElementIntoView(ctx), "scrollElementTarget");
         checkThresholds(ctx);
     }
     if (result.shouldMaintainScrollAtEnd) {

@@ -1,7 +1,6 @@
 import { USER_MOMENTUM_STALL_TIMEOUT_MS } from "@/constants";
 import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
-import { emitMetrics } from "@/core/emitMetrics";
 import { isEndOfContentTarget } from "@/core/endOfContentTarget";
 import { getScrollRequestTracker } from "@/core/scrollRequestTracker";
 import { getAlignItemsAtEndPadding } from "@/core/updateContentMetricsState";
@@ -9,14 +8,10 @@ import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";
 import { getContentSize } from "@/state/getContentSize";
 import { peek$, type StateContext, set$ } from "@/state/state";
-import type { LegendListScrollResult } from "@/types.base";
 import { areKnownOrFixedItemSizesAvailable } from "@/utils/getItemSize";
 import { requestAdjust } from "@/utils/requestAdjust";
 
-export function interruptMaintainScrollAtEnd(
-    ctx: StateContext,
-    reason: Exclude<LegendListScrollResult, void>["reason"] = "interrupted",
-) {
+export function interruptMaintainScrollAtEnd(ctx: StateContext) {
     const { state } = ctx;
     const maintaining = state.maintainingScrollAtEnd;
     state.endFollowInterrupted = true;
@@ -27,13 +22,12 @@ export function interruptMaintainScrollAtEnd(
         (maintaining && state.scrollingTo?.isScrollToEnd)
     );
     if (cancelActiveScroll) {
-        cancelImperativeScroll(state, reason);
+        cancelImperativeScroll(state);
         set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
     }
     if (maintaining || state.pendingMaintainScrollAtEnd) {
         finishMaintainScrollAtEnd(ctx);
     }
-    emitMetrics(ctx);
     return cancelActiveScroll;
 }
 
@@ -61,10 +55,7 @@ export function rearmEndFollowIfSettled(ctx: StateContext) {
     ) {
         state.endFollowInterrupted = false;
         // Retain settled intent if the next content measurement moves the end beyond the threshold.
-        if (state.props.maintainScrollAtEnd) {
-            set$(ctx, "isFollowingEnd", true);
-            emitMetrics(ctx);
-        }
+        if (state.props.maintainScrollAtEnd) set$(ctx, "isFollowingEnd", true);
     }
 }
 
@@ -177,7 +168,6 @@ export function doMaintainScrollAtEnd(ctx: StateContext, options?: { immediate?:
     const dataLength = state.props.data.length;
     if (
         !didContainersLayout ||
-        state.activeSizeAnimations?.size ||
         // Wait for the anchored tail to be measured.
         (anchorIndex !== undefined &&
             anchorIndex >= 0 &&
@@ -221,10 +211,7 @@ export function doMaintainScrollAtEnd(ctx: StateContext, options?: { immediate?:
         state.maintainingScrollAtEnd = pendingState;
         const run = () => {
             if (state.maintainingScrollAtEnd !== pendingState) return;
-            if (state.activeSizeAnimations?.size) {
-                state.pendingMaintainScrollAtEnd = true;
-                state.maintainingScrollAtEnd = undefined;
-            } else if (
+            if (
                 state.isDragging ||
                 state.userScrollContentSize !== undefined ||
                 state.refScroller.current?.isScrollInRange?.() === false ||

@@ -5,7 +5,6 @@ import { calculateItemsInView } from "../../src/core/calculateItemsInView";
 import { cancelImperativeScroll } from "../../src/core/cancelImperativeScroll";
 import { createContainerItemMetadata } from "../../src/core/containerItemMetadata";
 import { rearmEndFollowIfSettled } from "../../src/core/doMaintainScrollAtEnd";
-import { emitMetrics } from "../../src/core/emitMetrics";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import * as initialScrollLifecycleModule from "../../src/core/initialScrollLifecycle";
 import { getScrollRequestTracker } from "../../src/core/scrollRequestTracker";
@@ -843,35 +842,6 @@ describe("createImperativeHandle.scrollToEnd", () => {
         }
     });
 
-    it("waits for active size animations to finish before scrolling to an index", async () => {
-        const { flushRaf, restore } = installRafMock();
-
-        try {
-            const ctx = createMockContext({}, {
-                activeSizeAnimations: new Set(["totalSize"]),
-                props: { data: [1, 2, 3] },
-            } as any);
-
-            const handle = createImperativeHandle(ctx);
-            const promise = handle.scrollToIndex({ animated: false, index: 2 });
-
-            flushRaf();
-            flushRaf();
-            expect(ctx.scrollRequestTracker?.isWaitingToRun()).toBe(true);
-            expect(scrollToIndexSpy).not.toHaveBeenCalled();
-
-            ctx.state.activeSizeAnimations!.clear();
-            flushRaf();
-            flushRaf();
-            expect(scrollToIndexSpy).toHaveBeenCalledTimes(1);
-            expect(ctx.scrollRequestTracker?.isWaitingToRun()).toBe(false);
-
-            await promise;
-        } finally {
-            restore();
-        }
-    });
-
     it("waits for anchored tail measurement before scrolling to the end", async () => {
         const { flushRaf, restore } = installRafMock();
 
@@ -1508,23 +1478,6 @@ describe("createImperativeHandle.anchorVisibleContent", () => {
         expect(ctx.values.get("isFollowingEnd")).toBe(true);
     });
 
-    it("publishes the ownership-only transition when reader anchoring interrupts following", () => {
-        const ctx = followingList(false);
-        const onMetricsChange = mock(() => {});
-        ctx.state.props.onMetricsChange = onMetricsChange;
-        ctx.state.props.trackScrollMetrics = true;
-        emitMetrics(ctx);
-        expect(ctx.state.lastMetrics?.isFollowingEnd).toBe(true);
-
-        createImperativeHandle(ctx).anchorVisibleContent("reader");
-
-        expect(ctx.values.get("isFollowingEnd")).toBe(false);
-        expect(onMetricsChange.mock.calls.at(-1)).toEqual([
-            expect.objectContaining({ isFollowingEnd: false, scroll: 450 }),
-        ]);
-        ctx.state.scheduledWork.dispose();
-    });
-
     it("keeps following when disclosure begins at the actual end", () => {
         const ctx = followingList(true);
         createImperativeHandle(ctx).anchorVisibleContent("reader");
@@ -1649,7 +1602,7 @@ describe("createImperativeHandle.scrollIndexIntoView", () => {
     };
 
     it("aligns a row below the observed viewport to the bottom margin", async () => {
-        await createList().scrollIndexIntoView({ animated: false, index: 15, viewportMargin: { bottom: 20 } });
+        await createList().scrollIndexIntoView({ animated: false, index: 15, viewportMargin: { end: 20 } });
 
         expect(scrollToIndexSpy).toHaveBeenCalledWith(
             expect.anything(),
@@ -1658,7 +1611,7 @@ describe("createImperativeHandle.scrollIndexIntoView", () => {
     });
 
     it("aligns a row hidden by the top margin to the top margin", async () => {
-        await createList().scrollIndexIntoView({ index: 10, viewportMargin: { top: 40 } });
+        await createList().scrollIndexIntoView({ index: 10, viewportMargin: { start: 40 } });
 
         expect(scrollToIndexSpy).toHaveBeenCalledWith(
             expect.anything(),
@@ -1721,7 +1674,7 @@ describe("createImperativeHandle.scrollIndexIntoView oversized rows", () => {
             const pending = createImperativeHandle(ctx).scrollIndexIntoView({
                 animated: false,
                 index: 10,
-                viewportMargin: { bottom: 20, top: 10 },
+                viewportMargin: { end: 20, start: 10 },
             });
 
             expect(scrollTo).toHaveBeenLastCalledWith({ animated: false, x: 0, y: 990 });
@@ -1732,106 +1685,17 @@ describe("createImperativeHandle.scrollIndexIntoView oversized rows", () => {
     }
 });
 
-describe("app native scroll refs", () => {
-    for (const method of [
-        "scrollTo",
-        "scrollToEnd",
-        "scrollToOffset",
-        "scrollResponderScrollTo",
-        "scrollResponderScrollNativeHandleToKeyboard",
-        "scrollResponderZoomTo",
-    ] as const) {
-        it(`binds ${method}, preserves the surface, and supersedes queued list navigation`, async () => {
-            Platform.OS = "ios";
-            const ctx = createMockContext({ isFollowingEnd: true }, { didFinishInitialScroll: true });
-            const handle = createImperativeHandle(ctx, () => {});
-            const pending = handle.scrollToEnd({ animated: true });
-            const raw = {
-                __nativeTag: 42,
-                getNativeScrollRef() {
-                    return this;
-                },
-                getScrollResponder() {
-                    return this;
-                },
-                measure() {
-                    return this.__nativeTag;
-                },
-                scrollResponderScrollNativeHandleToKeyboard() {
-                    return this.__nativeTag;
-                },
-                scrollResponderScrollTo() {
-                    return this.__nativeTag;
-                },
-                scrollResponderZoomTo() {
-                    return this.__nativeTag;
-                },
-                scrollTo() {
-                    return this.__nativeTag;
-                },
-                scrollToEnd() {
-                    return this.__nativeTag;
-                },
-                scrollToOffset() {
-                    return this.__nativeTag;
-                },
-            };
-            ctx.state.refScroller.current = raw as any;
-            const appRef = handle.getNativeScrollRef();
-            expect(appRef).toBe(handle.getNativeScrollRef());
-            expect(appRef.getNativeScrollRef()).toBe(appRef);
-            expect(handle.getScrollResponder()).toBe(appRef);
-            expect(appRef.measure()).toBe(42);
-            expect(appRef.__nativeTag).toBe(42);
-            const command = appRef[method];
-            expect(command).toBe(appRef[method]);
-            expect(command({ animated: false, y: 0 })).toBe(42);
-            expect(await pending).toEqual({ reason: "superseded" });
-            expect(handle.getState().isFollowingEnd).toBe(false);
-            expect(ctx.state.pendingScrollToEnd).toBeUndefined();
-            expect(ctx.state.refScroller.current).toBe(raw);
-        });
-    }
-
-    for (const hasPendingMeasurement of [false, true]) {
-        it(`commits cancellation adjustments only for pending end measurements (pending: ${hasPendingMeasurement})`, () => {
-            Platform.OS = "ios";
-            const ctx = createMockContext(
-                {},
-                {
-                    didFinishInitialScroll: true,
-                    pendingEndMeasurements: new Set(hasPendingMeasurement ? ["item_0"] : []),
-                },
-            );
-            const commitPendingAdjust = mock(() => {});
-            ctx.state.scrollAdjustHandler.commitPendingAdjust = commitPendingAdjust;
-            const scrollTo = mock(() => {});
-            ctx.state.refScroller.current = { scrollTo } as any;
-
-            createImperativeHandle(ctx).getNativeScrollRef().scrollTo({ animated: false, y: 0 });
-            ctx.state.scheduledWork.dispose();
-
-            expect(scrollTo).toHaveBeenCalledTimes(1);
-            expect(commitPendingAdjust).toHaveBeenCalledTimes(hasPendingMeasurement ? 1 : 0);
-        });
-    }
-
-    it("uses the same wrapper for both getters and replaces it when the native instance changes", () => {
-        Platform.OS = "android";
+describe("native scroll refs", () => {
+    it("returns the native instances unchanged", () => {
+        Platform.OS = "ios";
         const ctx = createMockContext();
+        const responder = {};
+        const raw = { getScrollResponder: () => responder, scrollTo: () => {} };
+        ctx.state.refScroller.current = raw as any;
         const handle = createImperativeHandle(ctx);
-        ctx.state.refScroller.current = { scrollTo: () => {} } as any;
-        const first = handle.getNativeScrollRef();
-        expect(handle.getAnimatableRef()).toBe(first);
-        ctx.state.refScroller.current = { scrollTo: () => {} } as any;
-        expect(handle.getNativeScrollRef()).not.toBe(first);
-        expect(handle.getAnimatableRef()).toBe(handle.getNativeScrollRef());
-    });
-
-    it("keeps web refs unchanged", () => {
-        Platform.OS = "web";
-        const ctx = createMockContext();
-        expect(createImperativeHandle(ctx).getNativeScrollRef()).toBe(ctx.state.refScroller.current);
+        expect(handle.getNativeScrollRef()).toBe(raw);
+        expect(handle.getAnimatableRef()).toBe(raw);
+        expect(handle.getScrollResponder()).toBe(responder);
     });
 });
 

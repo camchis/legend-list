@@ -13,7 +13,6 @@ export type ScheduledWorkKey =
     | "maintainScrollAtEnd"
     | "mvcpRecalculate"
     | "platformScrollCompletion"
-    | "scrollElementTarget"
     | "scrollTargetRetarget"
     | "preservedInitialScroll"
     | "renderRangeProjection";

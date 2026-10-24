@@ -264,7 +264,7 @@ export function updateItemPositions(
     if (targetRemoved) {
         // An older target can disappear while a newer request waits for layout.
         if (ctx.scrollRequestTracker?.isWaitingToRun()) finishScrollTo(ctx);
-        else cancelScroll(ctx, true, "unreachable");
+        else cancelScroll(ctx);
     } else if (
         scrollingTo &&
         (scrollingTo.isScrollToEnd || scrollingTo.key !== undefined) &&

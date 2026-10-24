@@ -1,8 +1,8 @@
 import { cancelScrollCompletionChecks } from "@/core/cancelImperativeScroll";
 import { releaseDeferredPublicOnScroll } from "@/core/deferredPublicOnScroll";
-import { getObservedScrollOffset } from "@/core/emitMetrics";
 import { isEndOfContentTarget } from "@/core/endOfContentTarget";
 import { initialScrollCompletion, initialScrollWatchdog, setInitialScrollSession } from "@/core/initialScrollSession";
+import { getObservedScrollOffset } from "@/core/observedScroll";
 import { recalculateSettledScroll } from "@/core/recalculateSettledScroll";
 import { Platform } from "@/platform/Platform";
 import { type StateContext, set$ } from "@/state/state";

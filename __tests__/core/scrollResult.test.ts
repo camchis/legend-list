@@ -5,15 +5,11 @@ import { calculateItemsInView } from "@/core/calculateItemsInView";
 import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
 import { interruptUserScroll } from "@/core/cancelScroll";
 import { checkFinishedScrollFallback } from "@/core/checkFinishedScroll";
-import { checkResetContainers } from "@/core/checkResetContainers";
 import { interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import { finishInitialScroll } from "@/core/finishInitialScroll";
-import { finishScrollTo } from "@/core/finishScrollTo";
 import { handleLayout } from "@/core/handleLayout";
 import { resetLayoutCachesForDataChange } from "@/core/resetLayoutCachesForDataChange";
-import { scrollElementIntoView } from "@/core/scrollElementIntoView";
 import { updateItemPositions } from "@/core/updateItemPositions";
-import { updateItemSizes } from "@/core/updateItemSizes";
 import { Platform } from "@/platform/Platform";
 import { createImperativeHandle } from "@/utils/createImperativeHandle";
 import { normalizeMaintainVisibleContentPosition } from "@/utils/normalizeMaintainVisibleContentPosition";
@@ -38,7 +34,7 @@ afterEach(() => {
 
 describe("imperative scroll results", () => {
     for (const following of [false, true]) {
-        for (const method of ["scrollIndexIntoView", "scrollItemIntoView", "scrollElementIntoView"] as const) {
+        for (const method of ["scrollIndexIntoView", "scrollItemIntoView"] as const) {
             it(`stops superseded ${following ? "end-follow" : "explicit"} motion for an already-visible ${method} target`, async () => {
                 const h = harness!;
                 const old = trackScroll(
@@ -48,32 +44,14 @@ describe("imperative scroll results", () => {
                 );
                 h.browser.step(100);
                 if (following) h.state.maintainingScrollAtEnd = "animated";
-                h.state.refScroller.current!.getScrollableNode = () =>
-                    ({
-                        clientHeight: 500,
-                        clientLeft: 0,
-                        clientTop: 0,
-                        clientWidth: 100,
-                        getBoundingClientRect: () => ({ left: 0, top: 0 }),
-                    }) as any;
-                const element = {
-                    getBoundingClientRect: () => ({
-                        bottom: 300 - h.browser.offset,
-                        height: 100,
-                        top: 200 - h.browser.offset,
-                    }),
-                    isConnected: true,
-                };
                 const ref = createImperativeHandle(h.ctx);
                 const result = trackScroll(
                     method === "scrollIndexIntoView"
                         ? ref.scrollIndexIntoView({ index: 2 })
-                        : method === "scrollItemIntoView"
-                          ? ref.scrollItemIntoView({ item: h.state.props.data[2] })
-                          : ref.scrollElementIntoView({ element: element as any }),
+                        : ref.scrollItemIntoView({ item: h.state.props.data[2] }),
                 );
                 await flushMicrotasks();
-                expect(old.value).toEqual({ reason: "superseded" });
+                expect(old.value).toBeUndefined();
                 expect(result.resolved).toBe(true);
                 expect(result.value).toBeUndefined();
                 h.browser.runToEnd();
@@ -118,7 +96,7 @@ describe("imperative scroll results", () => {
         expect(h.state.scrollPrev).toBe(500);
     });
 
-    it("resolves a key still missing after the settle window as unreachable without dispatch", async () => {
+    it("settles a key still missing after the settle window without dispatch", async () => {
         const h = harness!;
         spyOn(Date, "now").mockImplementation(() => h.clock.now);
         const result = trackScroll(h.ref.scrollToKey({ animated: true, key: "absent" }));
@@ -127,7 +105,7 @@ describe("imperative scroll results", () => {
         h.clock.advance(1000);
         await flushMicrotasks();
         expect(result.resolved).toBe(true);
-        expect(result.value).toEqual({ reason: "unreachable" });
+        expect(result.value).toBeUndefined();
         expect(h.scrollToCalls).toHaveLength(0);
     });
 
@@ -180,7 +158,7 @@ describe("imperative scroll results", () => {
     });
 
     for (const queued of [true, false]) {
-        it(`resolves a deleted ${queued ? "queued" : "active"} keyed target as unreachable`, async () => {
+        it(`settles a deleted ${queued ? "queued" : "active"} keyed target`, async () => {
             const h = harness!;
             h.ctx.values.set("numContainers", 10);
             h.ctx.values.set("readyToRender", true);
@@ -198,28 +176,28 @@ describe("imperative scroll results", () => {
             h.clock.advance(1000);
             await flushMicrotasks();
             expect(result.resolved).toBe(true);
-            expect(result.value).toEqual({ reason: "unreachable" });
+            expect(result.value).toBeUndefined();
             expect(h.state.scrollingTo).toBeUndefined();
             expect(h.scrollToCalls.length).toBeLessThanOrEqual(calls + 1);
         });
     }
 
     for (const method of ["scrollToItem", "scrollItemIntoView"] as const) {
-        it(`resolves a missing ${method} item as unreachable`, async () => {
+        it(`settles a missing ${method} item`, async () => {
             const h = harness!;
             const result = trackScroll(h.ref[method]({ animated: true, item: { id: -1 } }));
             await flushMicrotasks();
             expect(result.resolved).toBe(true);
-            expect(result.value).toEqual({ reason: "unreachable" });
+            expect(result.value).toBeUndefined();
         });
-        it(`resolves a deleted active ${method} item as unreachable`, async () => {
+        it(`settles a deleted active ${method} item`, async () => {
             const h = harness!;
             const result = trackScroll(h.ref[method]({ animated: true, item: h.state.props.data[50] }));
             h.browser.step(400);
             h.setData(10);
             updateItemPositions(h.ctx, true);
             await flushMicrotasks();
-            expect(result.value).toEqual({ reason: "unreachable" });
+            expect(result.value).toBeUndefined();
             expect(h.state.scrollingTo).toBeUndefined();
         });
         it(`retains ${method} through an immutable same-key update and prepend`, async () => {
@@ -262,7 +240,7 @@ describe("imperative scroll results", () => {
         await flushMicrotasks();
         expect(resizedKey).toBe(key);
         expect(result.resolved).toBe(true);
-        expect(result.value).toEqual({ reason: "unreachable" });
+        expect(result.value).toBeUndefined();
         expect(h.state.scrollingTo).toBeUndefined();
     });
 
@@ -280,32 +258,6 @@ describe("imperative scroll results", () => {
         expect(h.browser.offset).toBe(5000);
     });
 
-    for (const retarget of [false, true]) {
-        it(`preserves a newer waiting request when an older DOM target detaches (retarget: ${retarget})`, async () => {
-            const h = harness!;
-            const target = { element: { isConnected: false } as any };
-            void h.ref.scrollToOffset({ animated: true, offset: 1000 });
-            h.state.didDataChange = true;
-            const newer = trackScroll(h.ref.scrollToIndex({ animated: true, index: 20 }));
-            // A queued retarget/completion from the older request still sees its detached element.
-            h.state.scrollElementTarget = target;
-            h.state.refScroller.current!.getScrollableNode = () => ({ getBoundingClientRect() {} }) as any;
-            if (retarget) scrollElementIntoView(h.ctx);
-            else finishScrollTo(h.ctx);
-            await flushMicrotasks();
-            expect(newer.resolved).toBe(false);
-            h.state.scrollElementTarget = undefined;
-            h.state.didDataChange = false;
-            h.clock.advance(32);
-            h.browser.runToEnd();
-            h.clock.advance(100);
-            await flushMicrotasks();
-            expect(newer.resolved).toBe(true);
-            expect(newer.value).toBeUndefined();
-            expect(h.browser.offset).toBe(2000);
-        });
-    }
-
     it("stops once without duplicate MVCP writes when the active target and an earlier row are deleted", async () => {
         const h = harness!;
         h.ctx.values.set("numContainers", 10);
@@ -320,7 +272,7 @@ describe("imperative scroll results", () => {
         calculateItemsInView(h.ctx, { dataChanged: true, doMVCP: true });
         h.clock.advance(100);
         await flushMicrotasks();
-        expect(result.value).toEqual({ reason: "unreachable" });
+        expect(result.value).toBeUndefined();
         // The removed scroll target owned MVCP; its obsolete correction must be abandoned.
         expect(h.state.scroll).toBe(400);
         expect(h.browser.offset).toBe(400);
@@ -371,141 +323,11 @@ describe("imperative scroll results", () => {
         });
     }
 
-    for (const trigger of ["measurement", "data change"]) {
-        it(`queued DOM retarget after ${trigger} does not cancel a newer active offset request`, async () => {
-            const h = harness!;
-            let top = 1400;
-            const element = {
-                getBoundingClientRect: () => ({
-                    bottom: top + 100 - h.browser.offset,
-                    height: 100,
-                    left: 0,
-                    right: 100,
-                    top: top - h.browser.offset,
-                    width: 100,
-                }),
-                isConnected: true,
-            };
-            h.state.refScroller.current!.getScrollableNode = () =>
-                ({
-                    clientHeight: 500,
-                    clientLeft: 0,
-                    clientTop: 0,
-                    clientWidth: 100,
-                    getBoundingClientRect: () => ({ bottom: 500, left: 0, right: 100, top: 0 }),
-                }) as any;
-            const old = trackScroll(
-                createImperativeHandle(h.ctx).scrollElementIntoView({ animated: true, element: element as any }),
-            );
-            h.browser.step(100);
-            top += 20;
-            if (trigger === "measurement") {
-                updateItemSizes(h.ctx, { itemKey: "item_0", size: { height: 120, width: 100 } });
-            } else {
-                h.setData(101);
-                checkResetContainers(h.ctx, h.state.props.data);
-            }
-            const newer = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 5000 }));
-            await flushMicrotasks();
-            expect(old.value).toEqual({ reason: "superseded" });
-            expect(newer.resolved).toBe(false);
-            h.browser.runToEnd();
-            h.clock.advance(100);
-            await flushMicrotasks();
-            expect(newer.resolved).toBe(true);
-            expect(newer.value).toBeUndefined();
-            expect(h.browser.offset).toBe(5000);
-        });
-    }
-
-    it("resolves a missing reveal index as unreachable", async () => {
+    it("settles a missing reveal index", async () => {
         const result = trackScroll(harness!.ref.scrollIndexIntoView({ index: 100 }));
         await flushMicrotasks();
-        expect(result.value).toEqual({ reason: "unreachable" });
-    });
-
-    it("preserves animated element reveal when item measurements retarget it", async () => {
-        const h = harness!;
-        let top = 1400;
-        const element = {
-            getBoundingClientRect: () => ({
-                bottom: top + 100 - h.browser.offset,
-                height: 100,
-                left: 0,
-                right: 100,
-                top: top - h.browser.offset,
-                width: 100,
-            }),
-            isConnected: true,
-        };
-        h.state.refScroller.current!.getScrollableNode = () =>
-            ({
-                clientHeight: 500,
-                clientLeft: 0,
-                clientTop: 0,
-                clientWidth: 100,
-                getBoundingClientRect: () => ({ bottom: 500, left: 0, right: 100, top: 0 }),
-            }) as any;
-        const result = trackScroll(
-            createImperativeHandle(h.ctx).scrollElementIntoView({ animated: true, element: element as any }),
-        );
-        h.browser.step(100);
-        top += 20;
-        updateItemSizes(h.ctx, { itemKey: "item_0", size: { height: 120, width: 100 } });
-        await flushMicrotasks();
-        expect(h.scrollToCalls.at(-1)?.animated).toBe(true);
-        expect(h.browser.offset).toBe(100);
-        h.browser.runToEnd();
-        h.clock.advance(100);
-        await flushMicrotasks();
-        expect(result.resolved).toBe(true);
         expect(result.value).toBeUndefined();
-        expect(h.browser.offset).toBe(1020);
     });
-
-    for (const detachedDuringScroll of [false, true]) {
-        it(`resolves an element detached ${detachedDuringScroll ? "during" : "before"} scrolling as unreachable`, async () => {
-            const h = harness!;
-            const element = {
-                getBoundingClientRect: () => ({
-                    bottom: 1500,
-                    height: 100,
-                    left: 0,
-                    right: 100,
-                    top: 1400,
-                    width: 100,
-                }),
-                isConnected: detachedDuringScroll,
-            };
-            h.state.refScroller.current!.getScrollableNode = () =>
-                ({
-                    clientHeight: 500,
-                    clientLeft: 0,
-                    clientTop: 0,
-                    clientWidth: 100,
-                    getBoundingClientRect: () => ({
-                        bottom: 500,
-                        height: 500,
-                        left: 0,
-                        right: 100,
-                        top: 0,
-                        width: 100,
-                    }),
-                }) as any;
-            const result = trackScroll(
-                createImperativeHandle(h.ctx).scrollElementIntoView({ animated: true, element: element as any }),
-            );
-            element.isConnected = false;
-            if (detachedDuringScroll) {
-                h.browser.runToEnd();
-                h.clock.advance(100);
-            }
-            await flushMicrotasks();
-            expect(result.resolved).toBe(true);
-            expect(result.value).toEqual({ reason: "unreachable" });
-            expect(h.state.scrollingTo).toBeUndefined();
-        });
-    }
 
     for (const index of [-1, 200]) {
         it(`clamps scrollToIndex to existing data after settling (index: ${index})`, async () => {
@@ -524,42 +346,42 @@ describe("imperative scroll results", () => {
     }
 
     for (const headerSize of [0, 1200]) {
-        it(`resolves scrollToEnd on empty data as unreachable (header: ${headerSize})`, async () => {
+        it(`settles scrollToEnd on empty data (header: ${headerSize})`, async () => {
             const h = harness!;
             h.setData(0);
             h.ctx.values.set("headerSize", headerSize);
             const result = trackScroll(h.ref.scrollToEnd({ animated: true }));
             await flushMicrotasks();
             expect(result.resolved).toBe(true);
-            expect(result.value).toEqual({ reason: "unreachable" });
+            expect(result.value).toBeUndefined();
             expect(h.scrollToCalls).toHaveLength(0);
             expect(h.browser.offset).toBe(0);
         });
     }
 
-    it("resolves scrollToIndex on empty data as unreachable", async () => {
+    it("settles scrollToIndex on empty data", async () => {
         const h = harness!;
         h.setData(0);
         spyOn(Date, "now").mockImplementation(() => h.clock.now);
         const result = trackScroll(h.ref.scrollToIndex({ index: 0 }));
         h.clock.advance(1000);
         await flushMicrotasks();
-        expect(result.value).toEqual({ reason: "unreachable" });
+        expect(result.value).toBeUndefined();
         expect(h.scrollToCalls).toHaveLength(0);
     });
 
-    it("resolves an active index removed by truncation as unreachable", async () => {
+    it("settles an active index removed by truncation", async () => {
         const h = harness!;
         const result = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
         h.browser.step(400);
         h.setData(10);
         updateItemPositions(h.ctx, true);
         await flushMicrotasks();
-        expect(result.value).toEqual({ reason: "unreachable" });
+        expect(result.value).toBeUndefined();
         expect(h.state.scrollingTo).toBeUndefined();
     });
 
-    it("resolves a landed scroll with undefined", async () => {
+    it("resolves a landed scroll", async () => {
         const h = harness!;
         const scroll = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 1200 }));
 
@@ -572,7 +394,7 @@ describe("imperative scroll results", () => {
         expect(h.browser.offset).toBe(1200);
     });
 
-    it("resolves a superseded scrollToIndex with reason superseded and lands the newer one", async () => {
+    it("settles a superseded scrollToIndex and lands the newer one", async () => {
         const h = harness!;
         const first = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
         h.browser.step(400);
@@ -580,7 +402,7 @@ describe("imperative scroll results", () => {
         const second = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 300 }));
         await flushMicrotasks();
         expect(first.resolved).toBe(true);
-        expect(first.value).toEqual({ reason: "superseded" });
+        expect(first.value).toBeUndefined();
         expect(second.resolved).toBe(false);
 
         h.browser.runToEnd();
@@ -591,18 +413,18 @@ describe("imperative scroll results", () => {
         expect(h.browser.offset).toBe(300);
     });
 
-    it("resolves a scroll waiting for data to settle as superseded when replaced", async () => {
+    it("settles a scroll waiting for data to settle when replaced", async () => {
         const h = harness!;
         h.state.didDataChange = true;
         const first = trackScroll(h.ref.scrollToIndex({ animated: true, index: 20 }));
         const second = trackScroll(h.ref.scrollToIndex({ animated: true, index: 30 }));
         await flushMicrotasks();
 
-        expect(first.value).toEqual({ reason: "superseded" });
+        expect(first.value).toBeUndefined();
         expect(second.resolved).toBe(false);
     });
 
-    it("resolves with reason interrupted when user input stops an end-follow scroll", async () => {
+    it("settles when user input stops an end-follow scroll", async () => {
         const h = harness!;
         const scroll = trackScroll(h.ref.scrollToEnd({ animated: true }));
         h.clock.tick();
@@ -611,7 +433,7 @@ describe("imperative scroll results", () => {
 
         expect(interruptMaintainScrollAtEnd(h.ctx)).toBe(true);
         await flushMicrotasks();
-        expect(scroll.value).toEqual({ reason: "interrupted" });
+        expect(scroll.value).toBeUndefined();
     });
 
     it("supersedes active end following when a newer explicit request takes ownership", async () => {
@@ -623,7 +445,7 @@ describe("imperative scroll results", () => {
 
         const second = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 300 }));
         await flushMicrotasks();
-        expect(first.value).toEqual({ reason: "superseded" });
+        expect(first.value).toBeUndefined();
         expect(second.resolved).toBe(false);
 
         h.browser.runToEnd();
@@ -635,7 +457,7 @@ describe("imperative scroll results", () => {
     });
 
     for (const maintaining of [false, true]) {
-        it(`resolves user cancellation as interrupted (end following: ${maintaining})`, async () => {
+        it(`settles user cancellation (end following: ${maintaining})`, async () => {
             const h = harness!;
             const scroll = trackScroll(h.ref.scrollToEnd({ animated: true }));
             h.clock.tick();
@@ -644,12 +466,12 @@ describe("imperative scroll results", () => {
 
             interruptUserScroll(h.ctx);
             await flushMicrotasks();
-            expect(scroll.value).toEqual({ reason: "interrupted" });
+            expect(scroll.value).toBeUndefined();
             expect(h.browser.destination).toBeUndefined();
             expect(h.state.scrollingTo).toBeUndefined();
         });
 
-        it(`resolves programmatic cancellation as superseded (end following: ${maintaining})`, async () => {
+        it(`settles programmatic cancellation (end following: ${maintaining})`, async () => {
             const h = harness!;
             const scroll = trackScroll(h.ref.scrollToEnd({ animated: true }));
             h.clock.tick();
@@ -658,13 +480,13 @@ describe("imperative scroll results", () => {
 
             h.ref.cancelScroll();
             await flushMicrotasks();
-            expect(scroll.value).toEqual({ reason: "superseded" });
+            expect(scroll.value).toBeUndefined();
             expect(h.browser.destination).toBeUndefined();
             expect(h.state.scrollingTo).toBeUndefined();
         });
     }
 
-    it("resolves a queued request as interrupted when user input cancels it", async () => {
+    it("settles a queued request when user input cancels it", async () => {
         const h = harness!;
         h.state.didDataChange = true;
         const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 20 }));
@@ -674,18 +496,18 @@ describe("imperative scroll results", () => {
         h.state.didDataChange = false;
         h.clock.advance(2000);
         await flushMicrotasks();
-        expect(scroll.value).toEqual({ reason: "interrupted" });
+        expect(scroll.value).toBeUndefined();
         expect(h.scrollToCalls).toHaveLength(0);
     });
 
-    it("resolves programmatic teardown with the default superseded reason", async () => {
+    it("settles on programmatic teardown", async () => {
         const h = harness!;
         const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
         h.browser.step(400);
 
         cancelImperativeScroll(h.state);
         await flushMicrotasks();
-        expect(scroll.value).toEqual({ reason: "superseded" });
+        expect(scroll.value).toBeUndefined();
         expect(scroll.rejected).toBe(false);
     });
 });

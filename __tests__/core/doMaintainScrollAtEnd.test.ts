@@ -337,24 +337,6 @@ describe("doMaintainScrollAtEnd", () => {
             expect(globalThis.requestAnimationFrame).not.toHaveBeenCalled();
         });
 
-        it("defers end maintenance while a size animation is active", () => {
-            mockState.activeSizeAnimations = new Set(["totalSize"]);
-
-            expect(doMaintainScrollAtEnd(mockCtx)).toBe(false);
-            expect(mockState.pendingMaintainScrollAtEnd).toBe(true);
-            expect(globalThis.requestAnimationFrame).not.toHaveBeenCalled();
-        });
-
-        it("re-pends a scheduled maintain frame when a size animation starts before it runs", () => {
-            expect(doMaintainScrollAtEnd(mockCtx)).toBe(true);
-            mockState.activeSizeAnimations = new Set(["totalSize"]);
-            rafCallback?.();
-
-            expect(mockState.pendingMaintainScrollAtEnd).toBe(true);
-            expect(mockState.maintainingScrollAtEnd).toBeUndefined();
-            expect(scrollToEndSpy).not.toHaveBeenCalled();
-        });
-
         it("waits for anchored end space tail rows to be measured before following", () => {
             mockState.props.data = [{ id: 0 }, { id: 1 }, { id: 2 }];
             mockState.props.anchoredEndSpace = { anchorIndex: 1 };

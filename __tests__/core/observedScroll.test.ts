@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import "../setup";
 
-import { getDistanceFromEnd, getObservedScrollOffset } from "../../src/core/emitMetrics";
+import { getDistanceFromEnd, getObservedScrollOffset } from "../../src/core/observedScroll";
 import { createMockContext } from "../__mocks__/createMockContext";
 
 describe("getObservedScrollOffset", () => {

@@ -71,150 +71,6 @@ describe("animated web scrolls resolve only once landed", () => {
         });
     }
 
-    describe("measured DOM targets", () => {
-        function elementAt(h: WebScrollHarness, index: number) {
-            h.state.refScroller.current!.getScrollableNode = () =>
-                ({
-                    clientHeight: 500,
-                    clientLeft: 0,
-                    clientTop: 0,
-                    clientWidth: 400,
-                    getBoundingClientRect: () => ({ bottom: 500, left: 0, top: 0 }),
-                }) as any;
-            return {
-                getBoundingClientRect: () => {
-                    const top = h.state.positions[index]! - h.browser.offset;
-                    return { bottom: top + 20, height: 20, top };
-                },
-                isConnected: true,
-            } as any;
-        }
-
-        for (const windowOwner of [false, true]) {
-            it.each(["ltr", "rtl"])(`reveals RTL rows (%s, window=${windowOwner})`, async (direction) => {
-                const rtlOwner = direction === "rtl";
-                const h = setup({
-                    horizontal: true,
-                    horizontalRTLScrollType: rtlOwner ? "negative" : "normal",
-                    rtl: true,
-                });
-                const originalStyle = globalThis.getComputedStyle;
-                const originalWindow = globalThis.window;
-                const owner = {
-                    clientLeft: 0,
-                    clientTop: 0,
-                    clientWidth: 500,
-                    getBoundingClientRect: () => ({ left: 0, right: 500, top: 0 }),
-                };
-                globalThis.getComputedStyle = (() => ({ direction })) as typeof getComputedStyle;
-                if (windowOwner)
-                    globalThis.window = { innerHeight: 400, innerWidth: 500 } as Window & typeof globalThis;
-                h.state.refScroller.current!.getScrollableNode = () => owner as any;
-                h.state.refScroller.current!.isWindowScroll = () => windowOwner;
-                const element = {
-                    getBoundingClientRect: () => ({
-                        left: rtlOwner ? 500 - 2100 + h.browser.offset : 2000 - h.browser.offset,
-                        right: rtlOwner ? 500 - 2000 + h.browser.offset : 2100 - h.browser.offset,
-                        width: 100,
-                    }),
-                    isConnected: true,
-                };
-                try {
-                    const scroll = trackScroll((h.ref as any).scrollElementIntoView({ animated: false, element }));
-                    await runUntilResolved(h, scroll);
-                    expect(scroll.resolved).toBe(true);
-                    expect(scroll.value).toBeUndefined();
-                    expect(element.getBoundingClientRect().left).toBeGreaterThanOrEqual(0);
-                    expect(element.getBoundingClientRect().right).toBeLessThanOrEqual(500);
-                    expect(h.browser.offset).toBe(1600);
-                } finally {
-                    globalThis.getComputedStyle = originalStyle;
-                    globalThis.window = originalWindow;
-                }
-            });
-        }
-
-        for (const direction of ["vertical", "horizontal", "horizontal RTL"]) {
-            for (const edge of ["start", "end"]) {
-                it(`reveals a target covered by the ${edge} border (${direction})`, async () => {
-                    const horizontal = direction !== "vertical";
-                    const rtl = direction === "horizontal RTL";
-                    const h = setup({
-                        horizontal,
-                        horizontalRTLScrollType: rtl ? "negative" : undefined,
-                        rtl,
-                        scrollLength: 380,
-                    });
-                    h.browser.moveTo(1000);
-                    h.state.refScroller.current!.getScrollableNode = () =>
-                        ({
-                            clientHeight: 380,
-                            clientLeft: 20,
-                            clientTop: 20,
-                            clientWidth: 380,
-                            getBoundingClientRect: () => ({ bottom: 428, left: 8, right: 428, top: 8 }),
-                        }) as any;
-                    const element = {
-                        getBoundingClientRect: () => {
-                            const start =
-                                (edge === "start" ? 8 : 410) + (horizontal && rtl ? 1 : -1) * (h.browser.offset - 1000);
-                            return {
-                                bottom: horizontal ? 46 : start + 18,
-                                height: 18,
-                                left: horizontal ? start : 28,
-                                right: horizontal ? start + 18 : 46,
-                                top: horizontal ? 28 : start,
-                                width: 18,
-                            };
-                        },
-                        isConnected: true,
-                    };
-                    const scroll = trackScroll((h.ref as any).scrollElementIntoView({ animated: false, element }));
-                    await runUntilResolved(h, scroll);
-                    expect(scroll.resolved).toBe(true);
-                    expect(scroll.value).toBeUndefined();
-                    const rect = element.getBoundingClientRect();
-                    expect(horizontal ? rect.left : rect.top).toBeGreaterThanOrEqual(28);
-                    expect(horizontal ? rect.right : rect.bottom).toBeLessThanOrEqual(408);
-                    expect(h.scrollToCalls).toHaveLength(1);
-                });
-            }
-        }
-
-        it("retargets an animated DOM reveal when preceding rows shrink", async () => {
-            const h = setup();
-            const element = elementAt(h, 50);
-            const scroll = trackScroll((h.ref as any).scrollElementIntoView({ animated: true, element }));
-            expect(h.browser.destination).toBe(4520);
-            h.browser.step(1000);
-            h.measure(Object.fromEntries(Array.from({ length: 10 }, (_, i) => [20 + i, 0])));
-            await runUntilResolved(h, scroll);
-            expect(scroll.resolved).toBe(true);
-            expect(scroll.value).toBeUndefined();
-            expect(element.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
-            expect(element.getBoundingClientRect().bottom).toBeLessThanOrEqual(500);
-            expect(h.browser.destination).toBeUndefined();
-        });
-
-        for (const animated of [false, true]) {
-            it(`reports unreachable when mandatory snapping prevents centered DOM alignment (animated: ${animated})`, async () => {
-                const h = setup();
-                const element = elementAt(h, 50);
-                const scroller = h.state.refScroller.current!;
-                const originalScrollTo = scroller.scrollTo;
-                scroller.scrollTo = (options) =>
-                    originalScrollTo({ ...options, y: Math.round(options.y! / 1000) * 1000 });
-                const scroll = trackScroll(
-                    (h.ref as any).scrollElementIntoView({ animated, element, viewPosition: 0.5 }),
-                );
-                await runUntilResolved(h, scroll);
-                expect(scroll.resolved).toBe(true);
-                expect(scroll.value).toEqual({ reason: "unreachable" });
-                expect(element.getBoundingClientRect().top).not.toBe(240);
-            });
-        }
-    });
-
     describe("late measurement", () => {
         it("does not resolve while passing a recomputed target on the way to the issued destination", async () => {
             const h = setup();
@@ -471,7 +327,7 @@ describe("animated web scrolls resolve only once landed", () => {
         const scroll = trackScroll(h.ref.scrollToOffset({ animated: false, offset: 1050 }));
         await runUntilResolved(h, scroll);
         expect(scroll.resolved).toBe(true);
-        expect(scroll.value).toEqual({ reason: "unreachable" });
+        expect(scroll.value).toBeUndefined();
         expect(h.browser.offset).toBe(1000);
     });
 
@@ -542,7 +398,7 @@ describe("animated web scrolls resolve only once landed", () => {
             h.clock.advance(3000);
             await flushMicrotasks();
 
-            expect(scroll.value).toEqual({ reason: "interrupted" });
+            expect(scroll.value).toBeUndefined();
             expect(h.scrollToCalls).toHaveLength(2);
         });
 
@@ -559,7 +415,7 @@ describe("animated web scrolls resolve only once landed", () => {
 
             h.browser.interruptByUser("touchstart");
             await flushMicrotasks();
-            expect(scroll.value).toEqual({ reason: "interrupted" });
+            expect(scroll.value).toBeUndefined();
             expect(h.state.pendingMaintainScrollAtEnd).toBe(false);
             expect(h.state.maintainingScrollAtEnd).toBeUndefined();
             expect(h.state.endFollowInterrupted).toBe(true);
@@ -580,7 +436,7 @@ describe("animated web scrolls resolve only once landed", () => {
                 h.measure({ 30: 300 });
                 h.browser.interruptByUser(input);
                 await flushMicrotasks();
-                expect(scroll.value).toEqual({ reason: "interrupted" });
+                expect(scroll.value).toBeUndefined();
                 expect(h.state.scrollingTo).toBeUndefined();
 
                 h.clock.advance(3000);
@@ -604,7 +460,7 @@ describe("animated web scrolls resolve only once landed", () => {
             const replacement = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 2000 }));
             h.clock.tick();
             await flushMicrotasks();
-            expect(first.value).toEqual({ reason: "superseded" });
+            expect(first.value).toBeUndefined();
             expect(replacement.resolved).toBe(false);
             h.state.didDataChange = false;
             await runUntilResolved(h, replacement);
@@ -652,7 +508,7 @@ describe("animated web scrolls resolve only once landed", () => {
             h.browser.step(100);
             h.browser.interruptByUser();
             await flushMicrotasks();
-            expect(scroll.value).toEqual({ reason: "interrupted" });
+            expect(scroll.value).toBeUndefined();
             h.clock.advance(3000);
             expect(h.scrollToCalls).toHaveLength(3);
         });
@@ -668,7 +524,7 @@ describe("animated web scrolls resolve only once landed", () => {
 
             const second = trackScroll(h.ref.scrollToIndex({ animated: true, index: 10 }));
             await flushMicrotasks();
-            expect(first.value).toEqual({ reason: "superseded" });
+            expect(first.value).toBeUndefined();
 
             await runUntilResolved(h, second);
             expect(second.value).toBeUndefined();
@@ -677,7 +533,7 @@ describe("animated web scrolls resolve only once landed", () => {
     });
 
     describe("data changes during the scroll", () => {
-        it("reports an active end target as unreachable when its data becomes empty", async () => {
+        it("settles an active end target when its data becomes empty", async () => {
             const h = setup();
             const scroll = trackScroll(h.ref.scrollToEnd({ animated: true }));
             h.browser.step(400);
@@ -687,7 +543,7 @@ describe("animated web scrolls resolve only once landed", () => {
             await runUntilResolved(h, scroll);
 
             expect(scroll.resolved).toBe(true);
-            expect(scroll.value).toEqual({ reason: "unreachable" });
+            expect(scroll.value).toBeUndefined();
             expect(h.state.scrollingTo).toBeUndefined();
         });
 
@@ -979,7 +835,7 @@ for (const mode of ["vertical LTR", "horizontal LTR", "negative RTL", "inverted 
             const scroll = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 1250 }));
             await runUntilResolved(h, scroll);
             expect(scroll.resolved).toBe(true);
-            expect(scroll.value).toEqual({ reason: "unreachable" });
+            expect(scroll.value).toBeUndefined();
             expect(h.browser.offset).toBe(1000);
             expect(h.scrollToCalls).toHaveLength(3);
             h.clock.advance(5000);
@@ -995,7 +851,7 @@ for (const mode of ["vertical LTR", "horizontal LTR", "negative RTL", "inverted 
                 h.browser.interruptByUser(input);
                 await flushMicrotasks();
                 expect(scroll.resolved).toBe(true);
-                expect(scroll.value).toEqual({ reason: "interrupted" });
+                expect(scroll.value).toBeUndefined();
                 expect(h.browser.offset).toBe(1000);
                 expect(h.state.scrollingTo).toBeUndefined();
             });
