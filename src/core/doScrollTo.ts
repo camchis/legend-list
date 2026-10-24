@@ -5,7 +5,7 @@ import { checkFinishedScrollFallback, getCurrentTargetOffset } from "@/core/chec
 import { type DoScrollToParams, getNativeScrollPoint } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { scrollTo } from "@/core/scrollTo";
-import type { StateContext } from "@/state/state";
+import { peek$, type StateContext } from "@/state/state";
 import type { LegendListScrollerRef } from "@/types.internal";
 import { clampScrollIndex } from "@/utils/clampScrollIndex";
 import { getItemSizeAtIndex } from "@/utils/getItemSize";
@@ -19,6 +19,12 @@ const SCROLL_LANDING_MAX_RETRIES = 3;
 // Remaining distances at or below this land with an instant scroll instead of another animation.
 const SCROLL_LANDING_SNAP_DISTANCE = 50;
 type ActiveScrollTarget = NonNullable<StateContext["state"]["scrollingTo"]>;
+
+// Adjustments deferred during an animated scroll keep rows rendered that much earlier until it
+// finishes, and the finish recomputes an index target from its row, so compare in native offsets.
+function getPendingIndexAdjust(ctx: StateContext, scrollingTo: ActiveScrollTarget) {
+    return scrollingTo.index === undefined ? 0 : (peek$(ctx, "scrollAdjustPending") ?? 0);
+}
 
 export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
     const state = ctx.state;
@@ -59,7 +65,10 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
         if (targetToken === state.scrollingTo) {
             const currentOffset = readOffset();
             const targetOffset = targetToken ? getCurrentTargetOffset(ctx, targetToken) : offset;
-            const landingOffset = Math.min(targetOffset, scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY);
+            const landingOffset = Math.min(
+                targetOffset - (targetToken ? getPendingIndexAdjust(ctx, targetToken) : 0),
+                scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
+            );
             if (targetToken?.isInitialScroll && Math.abs(currentOffset - targetOffset) > EDGE_POSITION_EPSILON) {
                 checkFinishedScrollFallback(ctx);
             } else if (
@@ -118,7 +127,7 @@ function retryLanding(
             ? {
                   index,
                   itemSize: getItemSizeAtIndex(ctx, index),
-                  offset: calculateOffsetForIndex(ctx, index),
+                  offset: calculateOffsetForIndex(ctx, index) - getPendingIndexAdjust(ctx, scrollingTo),
                   precomputedWithViewOffset: false,
               }
             : {}),
@@ -169,7 +178,7 @@ function listenForScrollEnd(
         const currentOffset = readOffset();
         // Measurements can move the target during scrolling, so compare against where it is now.
         const landingOffset = Math.min(
-            getCurrentTargetOffset(ctx, targetToken),
+            getCurrentTargetOffset(ctx, targetToken) - getPendingIndexAdjust(ctx, targetToken),
             scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
         );
         const isNearTarget = Math.abs(currentOffset - landingOffset) <= EDGE_POSITION_EPSILON;

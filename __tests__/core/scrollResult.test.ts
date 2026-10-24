@@ -92,6 +92,49 @@ describe("imperative scroll results", () => {
             });
         }
 
+        it("lands an animated scrollToIndex without retrying when the deferred adjustment already holds its target", async () => {
+            const h = harness!;
+            const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
+            h.browser.step(1000);
+            // Rows above the target measure 500 px taller mid-scroll. The deferred adjustment keeps them
+            // rendered 500 px higher, so index 50 is already at the native offset the browser is heading to.
+            h.measure({ 30: 300, 31: 300, 32: 200 });
+            requestAdjust(h.ctx, 500, "item-size");
+            expect(h.ctx.values.get("scrollAdjustPending")).toBe(500);
+
+            for (let i = 0; i < 100 && !scroll.resolved; i++) {
+                h.browser.step(400);
+                h.clock.tick();
+                await flushMicrotasks();
+            }
+            expect(scroll.resolved).toBe(true);
+            expect(h.scrollToCalls).toEqual([{ animated: true, y: 5000 }]);
+            expect(h.browser.offset).toBe(5000);
+            expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
+            expect(h.state.scroll).toBe(5500);
+        });
+
+        it("retries a short landing toward the target's rendered offset while an adjustment is deferred", async () => {
+            const h = harness!;
+            const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 50 }));
+            h.browser.step(1000);
+            // Rows above grow 500 px but only 300 px of it is deferred, so index 50 renders at 5200.
+            h.measure({ 30: 300, 31: 300, 32: 200 });
+            requestAdjust(h.ctx, 300, "item-size");
+
+            for (let i = 0; i < 100 && !scroll.resolved; i++) {
+                h.browser.step(400);
+                h.clock.tick();
+                await flushMicrotasks();
+            }
+            expect(scroll.resolved).toBe(true);
+            expect(h.scrollToCalls).toEqual([
+                { animated: true, y: 5000 },
+                { animated: true, y: 5200 },
+            ]);
+            expect(h.state.scroll).toBe(5500);
+        });
+
         it("commits a superseded animation's deferred adjustments when its replacement stops it", async () => {
             const h = harness!;
             trackScroll(h.ref.scrollToIndex({ animated: true, index: 40 }));
