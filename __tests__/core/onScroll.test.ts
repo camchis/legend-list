@@ -5,6 +5,7 @@ import { I18nManager } from "react-native";
 
 import { ScrollAdjustHandler } from "@/core/ScrollAdjustHandler";
 import { Platform } from "@/platform/Platform";
+import * as platformScroll from "../../src/core/doScrollTo";
 import { onScroll } from "../../src/core/onScroll";
 import type { StateContext } from "../../src/state/state";
 import type { InternalState } from "../../src/types.internal";
@@ -67,6 +68,23 @@ describe("onScroll", () => {
             expect(mockState.scrollPending).toBe(-216);
             expect(mockState.scrollingTo?.offset).toBe(300);
         });
+
+        for (const animated of [false, true]) {
+            it(`${animated ? "lets an animated" : "clamps a nonanimated"} request return from past the end`, () => {
+                const commands: number[] = [];
+                const spy = spyOn(platformScroll, "doScrollTo").mockImplementation((_ctx, { offset }) => {
+                    commands.push(offset);
+                });
+                mockCtx.values.set("totalSize", 1000);
+                mockState.scrollingTo = { animated, offset: 900, targetOffset: 500 } as any;
+                mockScrollEvent.nativeEvent.contentOffset.y = 700;
+
+                onScroll(mockCtx, mockScrollEvent);
+                spy.mockRestore();
+
+                expect(commands).toEqual(animated ? [] : [500]);
+            });
+        }
 
         it("should update scroll position for vertical scrolling", () => {
             onScroll(mockCtx, mockScrollEvent);

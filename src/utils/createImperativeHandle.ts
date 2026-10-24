@@ -242,6 +242,15 @@ export function createImperativeHandle(
         state.triggerCalculateItemsInView?.({ doMVCP: mode === "sizes", forceFullItemPositions: true });
     };
 
+    const reportContentInset = (inset: Parameters<LegendListInternalRef["reportContentInset"]>[0], follow = true) => {
+        const didChange = setContentInsetOverride(ctx, inset);
+        updateScroll(ctx, state.scroll, true, { markHasScrolled: false });
+        if (didChange && follow) {
+            const didRetargetInitial = retargetActiveInitialScrollAtEnd(ctx);
+            if (!didRetargetInitial) doMaintainScrollAtEnd(ctx);
+        }
+    };
+
     return {
         anchorVisibleContent: ({ key, hold = true } = {}) => {
             if (
@@ -279,7 +288,6 @@ export function createImperativeHandle(
             activeStickyIndex: peek$(ctx, "activeStickyIndex"),
             contentLength: getContentSize(ctx),
             data: state.props.data,
-            dataEpoch: state.freshDataTransitionEpoch,
             dataKey: state.props.dataKey,
             distanceFromEnd: Math.max(0, getContentSize(ctx) - getObservedScrollOffset(ctx) - state.scrollLength),
             elementAtIndex: (index: number) => ctx.viewRefs.get(findContainerId(ctx, getId(state, index)))?.current,
@@ -311,14 +319,8 @@ export function createImperativeHandle(
             start: state.startNoBuffer,
             startBuffered: state.startBuffered,
         }),
-        reportContentInset: (inset) => {
-            const didChange = setContentInsetOverride(ctx, inset);
-            updateScroll(ctx, state.scroll, true, { markHasScrolled: false });
-            if (didChange) {
-                const didRetargetInitial = retargetActiveInitialScrollAtEnd(ctx);
-                if (!didRetargetInitial) doMaintainScrollAtEnd(ctx);
-            }
-        },
+        reportContentInset,
+        reportContentInsetForScrollInternal: (inset) => reportContentInset(inset, false),
         reportViewabilityInsetEndInternal: (inset) => {
             const next = Number.isFinite(inset) ? Math.max(0, inset) : 0;
             if (next === (state.viewabilityInsetEnd ?? 0)) {

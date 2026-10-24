@@ -161,7 +161,13 @@ export function onScroll(ctx: StateContext, event: NativeSyntheticEvent<NativeSc
     state.lastNativeScrollTime = Date.now();
     if (state.scheduledWork.has("appScrollRearm")) armAppScrollRearm(ctx);
 
-    if (!state.props.hasExternalScroll && state.scrollingTo && state.scrollingTo.offset >= newScroll) {
+    // An animated request corrects its range on completion; snapping here would cut its motion.
+    if (
+        !state.props.hasExternalScroll &&
+        state.scrollingTo &&
+        !state.scrollingTo.animated &&
+        state.scrollingTo.offset >= newScroll
+    ) {
         const maxOffset = clampScrollOffset(ctx, newScroll, state.scrollingTo);
         if (newScroll !== maxOffset && Math.abs(newScroll - maxOffset) > 1) {
             // If the scroll is past the end for some reason, clamp it to the end

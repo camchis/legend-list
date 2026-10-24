@@ -173,9 +173,8 @@ export type AnchoredEndSpaceOwner = "list" | "scroll";
 // Internal bridge for integrations, not part of the public list ref contract.
 // Keyboard integrations report occlusion separately from scroll-range insets.
 export interface LegendListInternalRef extends LegendListRef {
-    /** dataEpoch increments when a new dataset starts placement, including reuse of an earlier dataKey. */
-    getState(): ReturnType<LegendListRef["getState"]> & { dataEpoch: number };
     reportViewabilityInsetEndInternal?: (inset: number) => void;
+    reportContentInsetForScrollInternal?: LegendListRef["reportContentInset"];
 }
 
 export interface InternalState {

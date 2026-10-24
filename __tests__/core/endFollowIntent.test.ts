@@ -114,6 +114,30 @@ describe("end follow intent", () => {
         expect(handle.getState().isFollowingEnd).toBe(false);
     });
 
+    it("reports an explicit end request's inset without scheduling end-follow", () => {
+        const ctx = createMockContext(
+            { isFollowingEnd: true, totalSize: 2000 },
+            {
+                didContainersLayout: true,
+                didFinishInitialScroll: true,
+                positions: [0],
+                props: { data: ["row"], getFixedItemSize: () => 2000, maintainScrollAtEnd: {} },
+                scroll: 300,
+                scrollLength: 800,
+                scrollPending: 300,
+            },
+        );
+        const maintain = spyOn(follow, "doMaintainScrollAtEnd");
+        const handle = createImperativeHandle(ctx);
+        handle.reportContentInsetForScrollInternal!({ bottom: 40 });
+        expect(ctx.state.contentInsetOverride?.bottom).toBe(40);
+        expect(maintain).not.toHaveBeenCalled();
+        expect(ctx.state.scheduledWork.has("maintainScrollAtEnd")).toBe(false);
+        expect(ctx.state.scroll).toBe(300);
+        expect(ctx.state.scrollPending).toBe(300);
+        ctx.state.scheduledWork.dispose();
+    });
+
     it("follows every measured animation step, including changes smaller than five pixels", () => {
         const ctx = createMockContext(
             { isWithinMaintainScrollAtEndThreshold: true },
@@ -400,7 +424,6 @@ describe("reading snapshots during dataset placement", () => {
         ctx.state.didFinishInitialScroll = true;
         ctx.state.freshDataTransitionEpoch = 1;
         ctx.state.handledFreshDataTransitionEpoch = 0;
-        expect(handle.getState().dataEpoch).toBe(1);
         expect(handle.anchorVisibleContent({ hold: false })).toBeUndefined();
         ctx.state.handledFreshDataTransitionEpoch = 1;
         expect(handle.anchorVisibleContent({ hold: false })).toEqual({ key: "item_0", offset: 0 });

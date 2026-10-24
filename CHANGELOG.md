@@ -38,10 +38,11 @@
 - Fix: When `getFixedItemSize` starts returning sizes for rows that were already measured, their stale measurements are dropped and the fixed sizes are applied, including rows reordered in the same render.
 - Fix: Web lists follow the end in one painted frame when every row grows after a mount or `dataKey` switch, instead of clamping against the stale content extent and catching up a frame late.
 - Fix: On Fabric, the native content extent commits in the same render pass as row positions, so shrinking content cannot briefly leave rows mispositioned.
-- Fix: TODO(keyboard-close): smooth keyboard close improvement, pending merge from a separate branch.
+- Fix: `scrollMessageToEnd({ closeKeyboard: true })` starts scrolling right away and eases to the closed end in one motion while the keyboard closes, dismissing it once, including back-to-back and mixed animated and non-animated sends.
 - Fix: `AnimatedLegendList` `itemLayoutAnimation` no longer animates rows while scrolling, during list scroll commands, or after layout adjustments, and skips the transition when a container switches items even without `recycleItems`.
 - Fix: Keyboard occlusion is excluded from viewability calculations, horizontal viewability uses the correct start padding including RTL, native content insets are counted only where applied, and `KeyboardAwareLegendList` keeps the static `contentInset` prop out of Android keyboard inset reports so it is not counted twice.
-- Fix: `scrollMessageToEnd({ closeKeyboard: true })` unfreezes keyboard tracking and waits for dismissal before scrolling to the end, so its target uses the final keyboard inset.
+- Fix: `scrollMessageToEnd({ closeKeyboard: true })` freezes keyboard tracking before the keyboard starts closing, so the list scrolls to the end in one motion instead of first moving back with the closing keyboard. A rejected scroll or a keyboard close that never settles no longer leaves `freeze` set. #557
+- Fix: Animated scrolls that start past the end of the content ease back into range instead of snapping.
 - Perf: With `recycleItems` enabled, reuse warm offscreen rows before empty containers, and skip key extraction for unchanged append prefixes.
 
 ## 3.6.0
