@@ -5,7 +5,7 @@ import { checkFinishedScrollFallback, getCurrentTargetOffset } from "@/core/chec
 import { type DoScrollToParams, getNativeScrollPoint } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { scrollTo } from "@/core/scrollTo";
-import { peek$, type StateContext } from "@/state/state";
+import type { StateContext } from "@/state/state";
 import type { LegendListScrollerRef } from "@/types.internal";
 import { clampScrollIndex } from "@/utils/clampScrollIndex";
 import { getItemSizeAtIndex } from "@/utils/getItemSize";
@@ -23,7 +23,7 @@ type ActiveScrollTarget = NonNullable<StateContext["state"]["scrollingTo"]>;
 // Adjustments deferred during an animated scroll keep rows rendered that much earlier until it
 // finishes, and the finish recomputes an index target from its row, so compare in native offsets.
 function getPendingIndexAdjust(ctx: StateContext, scrollingTo: ActiveScrollTarget) {
-    return scrollingTo.index === undefined ? 0 : (peek$(ctx, "scrollAdjustPending") ?? 0);
+    return scrollingTo.index === undefined ? 0 : ctx.state.scrollAdjustHandler.getUnsupersededPendingAdjust();
 }
 
 export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
@@ -65,9 +65,12 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
         if (targetToken === state.scrollingTo) {
             const currentOffset = readOffset();
             const targetOffset = targetToken ? getCurrentTargetOffset(ctx, targetToken) : offset;
-            const landingOffset = Math.min(
-                targetOffset - (targetToken ? getPendingIndexAdjust(ctx, targetToken) : 0),
-                scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
+            const landingOffset = Math.max(
+                0,
+                Math.min(
+                    targetOffset - (targetToken ? getPendingIndexAdjust(ctx, targetToken) : 0),
+                    scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
+                ),
             );
             if (targetToken?.isInitialScroll && Math.abs(currentOffset - targetOffset) > EDGE_POSITION_EPSILON) {
                 checkFinishedScrollFallback(ctx);
@@ -177,9 +180,12 @@ function listenForScrollEnd(
         }
         const currentOffset = readOffset();
         // Measurements can move the target during scrolling, so compare against where it is now.
-        const landingOffset = Math.min(
-            getCurrentTargetOffset(ctx, targetToken) - getPendingIndexAdjust(ctx, targetToken),
-            scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
+        const landingOffset = Math.max(
+            0,
+            Math.min(
+                getCurrentTargetOffset(ctx, targetToken) - getPendingIndexAdjust(ctx, targetToken),
+                scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
+            ),
         );
         const isNearTarget = Math.abs(currentOffset - landingOffset) <= EDGE_POSITION_EPSILON;
         // Initial scrolls keep their own completion path; scrollTo does not dispatch them on web.

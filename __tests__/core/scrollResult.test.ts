@@ -83,10 +83,13 @@ describe("imperative scroll results", () => {
                 // Applying an adjust moves Android's ScrollAdjust anchor, which cancels the replacement's animation.
                 expect(h.ctx.values.get("scrollAdjustPending")).toBe(100);
                 expect(h.scrollToCalls.at(-1)).toMatchObject({ animated: true });
+                const calls = h.scrollToCalls.length;
                 h.browser.runToEnd();
                 h.clock.advance(100);
                 await flushMicrotasks();
                 expect(next.resolved).toBe(true);
+                // The replacement's destination already accounts for the superseded adjustment.
+                expect(h.scrollToCalls.length).toBe(calls);
                 expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
                 expect(h.state.scroll).toBe(landing);
             });
@@ -112,6 +115,22 @@ describe("imperative scroll results", () => {
             expect(h.browser.offset).toBe(5000);
             expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
             expect(h.state.scroll).toBe(5500);
+        });
+
+        it("lands when the deferred adjustment exceeds the target's offset", async () => {
+            const h = harness!;
+            const scroll = trackScroll(h.ref.scrollToIndex({ animated: true, index: 5 }));
+            h.browser.step(100);
+            requestAdjust(h.ctx, 4000, "item-size");
+
+            for (let i = 0; i < 100 && !scroll.resolved; i++) {
+                h.browser.step(400);
+                h.clock.tick();
+                await flushMicrotasks();
+            }
+            expect(scroll.resolved).toBe(true);
+            expect(h.scrollToCalls.length).toBeLessThanOrEqual(2);
+            expect(h.ctx.values.get("scrollAdjustPending")).toBe(0);
         });
 
         it("retries a short landing toward the target's rendered offset while an adjustment is deferred", async () => {

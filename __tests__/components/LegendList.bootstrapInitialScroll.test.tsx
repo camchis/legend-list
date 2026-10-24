@@ -64,6 +64,9 @@ function registerLegendListBootstrapMocks() {
                 getAdjust() {
                     return this.appliedAdjust;
                 }
+                getUnsupersededPendingAdjust() {
+                    return this.pendingAdjust;
+                }
                 commitPendingAdjust() {}
             },
         };

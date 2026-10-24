@@ -34,6 +34,10 @@ export class ScrollAdjustHandler {
     getAdjust() {
         return this.appliedAdjust;
     }
+    /** Pending adjust the active animation's destination did not already account for. */
+    getUnsupersededPendingAdjust() {
+        return this.pendingAdjust - this.supersededAdjust;
+    }
     /** Keeps the pending adjust of a superseded animation out of its replacement's offset target. */
     supersedePendingAdjust() {
         this.supersededAdjust = this.pendingAdjust;
