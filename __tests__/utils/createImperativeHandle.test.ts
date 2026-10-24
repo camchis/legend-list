@@ -1339,7 +1339,126 @@ describe("createImperativeHandle visible anchors", () => {
     it("returns a string anchor key without a keyExtractor", () => {
         const ctx = createKeyedList();
         try {
-            expect(createImperativeHandle(ctx).getScrollAnchor()).toEqual({ key: "1", offset: 10 });
+            expect(createImperativeHandle(ctx).anchorVisibleContent()).toEqual({ key: "1", offset: 10 });
+            expect(ctx.state.visibleContentAnchor).toEqual({ key: getId(ctx.state, 1), offset: 10 });
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
+    it("reads without changing an existing hold, observed scroll state, or end intent", () => {
+        const ctx = createKeyedList();
+        const existing = { key: "0", offset: 25 };
+        ctx.state.visibleContentAnchor = existing;
+        ctx.state.scroll = 0;
+        ctx.state.refScroller.current = { getCurrentScrollOffset: () => 110 } as any;
+        ctx.values.set("isFollowingEnd", true);
+        try {
+            const handle = createImperativeHandle(ctx);
+            expect(handle.anchorVisibleContent({ hold: false })).toEqual({ key: "1", offset: 10 });
+            expect(handle.anchorVisibleContent({ hold: false, key: "2" })).toEqual({ key: "2", offset: -90 });
+            expect(ctx.state.visibleContentAnchor).toBe(existing);
+            expect(ctx.state.scroll).toBe(0);
+            expect(ctx.state.scrollHistory).toEqual([]);
+            expect(ctx.state.endFollowInterrupted).toBeUndefined();
+            expect(ctx.values.get("isFollowingEnd")).toBe(true);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
+    for (const getter of [false, true]) {
+        it(`captures and holds the observed offset with a synchronous getter ${getter}`, () => {
+            const ctx = createKeyedList();
+            ctx.state.scroll = 0;
+            ctx.state.lastNativeScroll = 110;
+            if (getter) ctx.state.refScroller.current = { getCurrentScrollOffset: () => 125 } as any;
+            ctx.values.set("isFollowingEnd", true);
+            try {
+                const offset = getter ? 25 : 10;
+                expect(createImperativeHandle(ctx).anchorVisibleContent()).toEqual({ key: "1", offset });
+                expect(ctx.state.visibleContentAnchor).toEqual({ key: getId(ctx.state, 1), offset });
+                expect(ctx.state.scroll).toBe(100 + offset);
+                expect(ctx.state.hasScrolled).toBeUndefined();
+                expect(ctx.values.get("isFollowingEnd")).toBe(false);
+            } finally {
+                ctx.state.scheduledWork.dispose();
+            }
+        });
+    }
+
+    it("returns the chosen item's offset and holds that item instead of the first visible item", () => {
+        const ctx = createKeyedList();
+        try {
+            expect(createImperativeHandle(ctx).anchorVisibleContent({ key: "2" })).toEqual({ key: "2", offset: -90 });
+            expect(ctx.state.visibleContentAnchor).toEqual({ key: getId(ctx.state, 2), offset: -90 });
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
+    it("returns a snapshot at the following end without replacing a hold or changing scroll state", () => {
+        const ctx = createKeyedList();
+        const existing = { key: "0", offset: 0 };
+        ctx.state.visibleContentAnchor = existing;
+        ctx.values.set("isFollowingEnd", true);
+        ctx.values.set("isAtEnd", true);
+        ctx.state.refScroller.current = { getCurrentScrollOffset: () => 125 } as any;
+        try {
+            expect(createImperativeHandle(ctx).anchorVisibleContent()).toEqual({ key: "1", offset: 25 });
+            expect(ctx.state.visibleContentAnchor).toBe(existing);
+            expect(ctx.state.scroll).toBe(110);
+            expect(ctx.values.get("isFollowingEnd")).toBe(true);
+        } finally {
+            ctx.state.scheduledWork.dispose();
+        }
+    });
+
+    for (const hold of [false, true]) {
+        for (const key of [undefined, "1"]) {
+            it(`waits for initial and fresh-data placement with hold ${hold} and key ${key}`, () => {
+                const ctx = createKeyedList();
+                ctx.values.set("isFollowingEnd", true);
+                const handle = createImperativeHandle(ctx);
+                try {
+                    ctx.state.didFinishInitialScroll = false;
+                    expect(handle.anchorVisibleContent({ hold, key })).toBeUndefined();
+                    expect(ctx.state.visibleContentAnchor).toBeUndefined();
+                    expect(ctx.values.get("isFollowingEnd")).toBe(true);
+                    ctx.state.didFinishInitialScroll = true;
+                    ctx.state.freshDataTransitionEpoch = 1;
+                    ctx.state.handledFreshDataTransitionEpoch = 0;
+                    expect(handle.anchorVisibleContent({ hold, key })).toBeUndefined();
+                    expect(ctx.state.visibleContentAnchor).toBeUndefined();
+                    expect(ctx.values.get("isFollowingEnd")).toBe(true);
+                    ctx.state.handledFreshDataTransitionEpoch = 1;
+                    expect(handle.anchorVisibleContent({ hold, key })).toEqual({ key: "1", offset: 10 });
+                    expect(ctx.state.visibleContentAnchor).toEqual(
+                        hold ? { key: getId(ctx.state, 1), offset: 10 } : undefined,
+                    );
+                    expect(ctx.values.get("isFollowingEnd")).toBe(!hold);
+                } finally {
+                    ctx.state.scheduledWork.dispose();
+                }
+            });
+        }
+    }
+
+    it("leaves an existing hold and scroll untouched when no positioned item can be captured", () => {
+        const ctx = createKeyedList();
+        const existing = { key: "0", offset: 25 };
+        ctx.state.visibleContentAnchor = existing;
+        ctx.values.set("isFollowingEnd", true);
+        try {
+            const handle = createImperativeHandle(ctx);
+            expect(handle.anchorVisibleContent({ key: "missing" })).toBeUndefined();
+            ctx.state.positions[1] = undefined;
+            expect(handle.anchorVisibleContent({ key: "1" })).toBeUndefined();
+            ctx.state.positions.length = 0;
+            expect(handle.anchorVisibleContent()).toBeUndefined();
+            expect(ctx.state.visibleContentAnchor).toBe(existing);
+            expect(ctx.state.scroll).toBe(110);
+            expect(ctx.values.get("isFollowingEnd")).toBe(true);
         } finally {
             ctx.state.scheduledWork.dispose();
         }
@@ -1350,8 +1469,8 @@ describe("createImperativeHandle visible anchors", () => {
             const ctx = createKeyedList(keyExtractor);
             try {
                 const handle = createImperativeHandle(ctx);
-                const anchor = handle.getScrollAnchor()!;
-                handle.anchorVisibleContent(anchor.key);
+                const anchor = handle.anchorVisibleContent({ hold: false })!;
+                handle.anchorVisibleContent({ key: anchor.key });
 
                 expect(ctx.state.visibleContentAnchor).toEqual({ key: getId(ctx.state, 1), offset: anchor.offset });
                 expect(ctx.state.indexByKey.get(ctx.state.visibleContentAnchor!.key)).toBe(1);
@@ -1364,7 +1483,7 @@ describe("createImperativeHandle visible anchors", () => {
             const ctx = createKeyedList(keyExtractor);
             try {
                 const handle = createImperativeHandle(ctx);
-                const anchor = handle.getScrollAnchor()!;
+                const anchor = handle.anchorVisibleContent({ hold: false })!;
                 ctx.state.scroll = 0;
                 const result = handle.scrollToKey({ animated: false, key: String(anchor.key) });
 
@@ -1380,7 +1499,7 @@ describe("createImperativeHandle visible anchors", () => {
         });
     }
 
-    for (const capture of ["getScrollAnchor", "clearCaches"] as const) {
+    for (const capture of ["anchorVisibleContent", "clearCaches"] as const) {
         it(`${capture} finds visible rows despite nonoccluding trailing space`, () => {
             const data = Array.from({ length: 10 }, (_, index) => String(index));
             const sizes = new Map(data.map((key) => [key, 100]));
@@ -1408,7 +1527,8 @@ describe("createImperativeHandle visible anchors", () => {
                     handle.clearCaches();
                     expect(ctx.state.visibleContentAnchor).toEqual({ key: "1", offset: 0, sizeOnly: true });
                 } else {
-                    expect(handle.getScrollAnchor()).toEqual({ key: "1", offset: 0 });
+                    expect(handle.anchorVisibleContent()).toEqual({ key: "1", offset: 0 });
+                    expect(ctx.state.visibleContentAnchor).toEqual({ key: "1", offset: 0 });
                 }
             } finally {
                 ctx.state.scheduledWork.dispose();
@@ -1438,7 +1558,8 @@ describe("createImperativeHandle visible anchors", () => {
                     handle.clearCaches();
                     expect(ctx.state.visibleContentAnchor).toEqual({ key: "tall", offset: 100, sizeOnly: true });
                 } else {
-                    expect(handle.getScrollAnchor()).toEqual({ key: "tall", offset: 100 });
+                    expect(handle.anchorVisibleContent()).toEqual({ key: "tall", offset: 100 });
+                    expect(ctx.state.visibleContentAnchor).toEqual({ key: "tall", offset: 100 });
                 }
             } finally {
                 ctx.state.scheduledWork.dispose();
@@ -1466,7 +1587,7 @@ describe("createImperativeHandle.anchorVisibleContent", () => {
 
     it("keeps an explicit reader anchor near the end until the reader releases it", () => {
         const ctx = followingList(false);
-        createImperativeHandle(ctx).anchorVisibleContent("reader");
+        createImperativeHandle(ctx).anchorVisibleContent({ key: "reader" });
 
         expect(ctx.state.visibleContentAnchor).toEqual({ key: "reader", offset: 450 });
         expect(ctx.values.get("isFollowingEnd")).toBe(false);
@@ -1480,7 +1601,7 @@ describe("createImperativeHandle.anchorVisibleContent", () => {
 
     it("keeps following when disclosure begins at the actual end", () => {
         const ctx = followingList(true);
-        createImperativeHandle(ctx).anchorVisibleContent("reader");
+        createImperativeHandle(ctx).anchorVisibleContent({ key: "reader" });
         expect(ctx.state.visibleContentAnchor).toBeUndefined();
         expect(ctx.values.get("isFollowingEnd")).toBe(true);
     });
@@ -1532,7 +1653,7 @@ describe("createImperativeHandle.anchorVisibleContent", () => {
         };
 
         try {
-            createImperativeHandle(ctx).anchorVisibleContent("item_6");
+            createImperativeHandle(ctx).anchorVisibleContent({ key: "item_6" });
 
             grow("item_5", 160);
             grow("item_6", 140);
@@ -1557,7 +1678,7 @@ describe("createImperativeHandle.anchorVisibleContent", () => {
     it("resumes following when scrollToEnd releases the reader anchor", () => {
         const ctx = followingList(false);
         const handle = createImperativeHandle(ctx);
-        handle.anchorVisibleContent("reader");
+        handle.anchorVisibleContent({ key: "reader" });
 
         void handle.scrollToEnd({ animated: false });
 

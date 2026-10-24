@@ -81,7 +81,7 @@ describe("size-cache invalidation reader anchoring", () => {
             finishScrollTo(ctx);
             await pending;
             updateItemSizesBatch(ctx, [{ itemKey: "item_19", size: { height: 140, width: 400 } }]);
-            expect(handle.getScrollAnchor()).toEqual({ key: "item_20", offset: 0 });
+            expect(handle.anchorVisibleContent({ hold: false })).toEqual({ key: "item_20", offset: 0 });
             expect(ctx.state.scroll).toBeGreaterThan(2000);
         } finally {
             ctx.state.scheduledWork.dispose();
@@ -151,7 +151,7 @@ describe("size-cache invalidation reader anchoring", () => {
                 try {
                     const handle = createImperativeHandle(ctx);
                     handle.clearCaches();
-                    if (explicit) handle.anchorVisibleContent("row-2");
+                    if (explicit) handle.anchorVisibleContent({ key: "row-2" });
 
                     rearmEndFollowIfSettled(ctx);
                     const remainedInterrupted = ctx.state.endFollowInterrupted;
@@ -228,7 +228,7 @@ describe("size-cache invalidation reader anchoring", () => {
                         })),
                     );
                     expect(ctx.state.scroll - ctx.state.positions[16]!).toBe(25);
-                    expect(handle.getScrollAnchor()).toEqual({ key: "row-16", offset: 25 });
+                    expect(handle.anchorVisibleContent({ hold: false })).toEqual({ key: "row-16", offset: 25 });
                 }
             }
 

@@ -21,18 +21,27 @@ for (const [name, entry] of [
         const source = `
 import type { LegendListRef, LegendListState } from "../../${entry}";
 import type { SectionListRef } from "../../src/section-list/SectionList";
-type Navigation = "cancelScroll" | "scrollToKey" | "getScrollAnchor" | "anchorVisibleContent";
+type Navigation = "cancelScroll" | "scrollToKey" | "anchorVisibleContent";
 declare const legacyRef: Omit<LegendListRef, Navigation>;
 declare const legacySection: Omit<SectionListRef, Navigation>;
 const navigation = {
     cancelScroll: () => {},
     scrollToKey: async (_params: { key: string }) => {},
-    getScrollAnchor: () => ({ key: "row", offset: 0 }),
-    anchorVisibleContent: (_key: string) => {},
+    anchorVisibleContent: (_options?: { key?: string; hold?: boolean }) => ({ key: "row", offset: 0 }),
 };
 const completeRef: LegendListRef = { ...legacyRef, ...navigation };
 const completeSection: SectionListRef = { ...legacySection, ...navigation };
-${["cancelScroll", "scrollToKey", "getScrollAnchor", "anchorVisibleContent"]
+for (const ref of [completeRef, completeSection]) {
+    const captured: { key: string; offset: number } | undefined = ref.anchorVisibleContent();
+    ref.anchorVisibleContent({ key: "row" });
+    ref.anchorVisibleContent({ hold: false });
+    ref.anchorVisibleContent({ key: "row", hold: false });
+    // @ts-expect-error keys are strings
+    ref.anchorVisibleContent({ key: 1 });
+    // @ts-expect-error hold is boolean
+    ref.anchorVisibleContent({ hold: "yes" });
+}
+${["cancelScroll", "scrollToKey", "anchorVisibleContent"]
     .map(
         (member) => `
 declare const missing${member}: Omit<LegendListRef, "${member}">;

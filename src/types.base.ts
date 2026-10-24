@@ -652,10 +652,13 @@ export type LegendListRef = {
     cancelScroll(): void;
     /** Scrolls by stable item identity through prepends; resolves without scrolling if the key is missing or removed. */
     scrollToKey(params: { key: string; animated?: boolean; viewOffset?: number; viewPosition?: number }): Promise<void>;
-    /** Captures the first visible item and its viewport offset after initial placement is ready. */
-    getScrollAnchor(): { key: string; offset: number } | undefined;
-    /** Keeps a visible item at its current viewport position through subsequent layout changes. */
-    anchorVisibleContent(key: string): void;
+    /**
+     * Captures an item's key and viewport offset, holding it through layout changes by default.
+     * Omit key to use the first visible item; set hold to false to read without side effects.
+     * Returns undefined before initial placement, during dataset replacement, or if no item is found.
+     * While following at the end, returns the anchor without interrupting end following.
+     */
+    anchorVisibleContent(options?: { key?: string; hold?: boolean }): { key: string; offset: number } | undefined;
     /**
      * Clears internal virtualization caches.
      * @param options - Cache clearing options.

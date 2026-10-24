@@ -171,7 +171,9 @@ describe("canonical scroll geometry", () => {
                 startNoBuffer: 0,
             },
         );
-        expect(createImperativeHandle(ctx).getScrollAnchor()).toEqual({ key: "c", offset: 20 });
+        expect(createImperativeHandle(ctx).anchorVisibleContent()).toEqual({ key: "c", offset: 20 });
+        expect(ctx.state.visibleContentAnchor).toEqual({ key: "c", offset: 50 });
+        expect(ctx.state.scroll).toBe(250);
     });
 
     for (const hasSynchronousGetter of [true, false]) {
@@ -394,14 +396,14 @@ describe("reading snapshots during dataset placement", () => {
             },
         );
         const handle = createImperativeHandle(ctx);
-        expect(handle.getScrollAnchor()).toBeUndefined();
+        expect(handle.anchorVisibleContent({ hold: false })).toBeUndefined();
         ctx.state.didFinishInitialScroll = true;
         ctx.state.freshDataTransitionEpoch = 1;
         ctx.state.handledFreshDataTransitionEpoch = 0;
         expect(handle.getState().dataEpoch).toBe(1);
-        expect(handle.getScrollAnchor()).toBeUndefined();
+        expect(handle.anchorVisibleContent({ hold: false })).toBeUndefined();
         ctx.state.handledFreshDataTransitionEpoch = 1;
-        expect(handle.getScrollAnchor()).toEqual({ key: "item_0", offset: 0 });
+        expect(handle.anchorVisibleContent({ hold: false })).toEqual({ key: "item_0", offset: 0 });
     });
 });
 

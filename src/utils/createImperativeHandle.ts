@@ -243,18 +243,27 @@ export function createImperativeHandle(
     };
 
     return {
-        anchorVisibleContent: (key) => {
-            if (peek$(ctx, "isFollowingEnd") && peek$(ctx, "isAtEnd")) return;
+        anchorVisibleContent: ({ key, hold = true } = {}) => {
+            if (
+                !state.didFinishInitialScroll ||
+                state.freshDataTransitionEpoch !== state.handledFreshDataTransitionEpoch
+            )
+                return undefined;
             const observed = getObservedScrollOffset(ctx);
-            updateScroll(ctx, observed, true, { markHasScrolled: false });
-            const index = getIndexForKey(key);
-            if (index !== undefined && state.positions[index] !== undefined) {
+            const viewportStart = observed - getStartOffsetAdjustment(ctx);
+            const index =
+                key === undefined
+                    ? findVisibleItemIndex(ctx, viewportStart, viewportStart + state.scrollLength)
+                    : getIndexForKey(key);
+            if (index === undefined || state.positions[index] === undefined) return undefined;
+            const id = getId(state, index);
+            const offset = viewportStart - state.positions[index]!;
+            if (hold && !(peek$(ctx, "isFollowingEnd") && peek$(ctx, "isAtEnd"))) {
+                updateScroll(ctx, observed, true, { markHasScrolled: false });
                 interruptMaintainScrollAtEnd(ctx);
-                state.visibleContentAnchor = {
-                    key: getId(state, index),
-                    offset: state.scroll - state.positions[index]!,
-                };
+                state.visibleContentAnchor = { key: id, offset: state.scroll - state.positions[index]! };
             }
+            return { key: String(id), offset };
         },
         cancelScroll: () => {
             armAppScrollRearm(ctx);
@@ -264,19 +273,6 @@ export function createImperativeHandle(
         flashScrollIndicators: () => refScroller.current!.flashScrollIndicators(),
         getAnimatableRef: () => refScroller.current!.getNativeScrollRef?.() ?? refScroller.current!,
         getNativeScrollRef: () => refScroller.current!,
-        getScrollAnchor: () => {
-            if (
-                !state.didFinishInitialScroll ||
-                state.freshDataTransitionEpoch !== state.handledFreshDataTransitionEpoch
-            )
-                return undefined;
-            const observed = getObservedScrollOffset(ctx);
-            const viewportStart = observed - getStartOffsetAdjustment(ctx);
-            const index = findVisibleItemIndex(ctx, viewportStart, viewportStart + state.scrollLength);
-            return index === undefined
-                ? undefined
-                : { key: String(getId(state, index)), offset: viewportStart - calculateOffsetForIndex(ctx, index) };
-        },
         getScrollableNode: () => refScroller.current!.getScrollableNode(),
         getScrollResponder: () => refScroller.current!.getScrollResponder(),
         getState: () => ({

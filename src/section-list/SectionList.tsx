@@ -104,7 +104,7 @@ export type SectionListProps<ItemT, SectionT extends SectionBase<ItemT> = Sectio
  * `${sectionKey}:separator:${itemIndex}` for item separators, and
  * `${sectionKey}:section-separator` for section separators.
  * `sectionKey` is the section's key, or `section-${sectionIndex}` when omitted; `itemKey` comes
- * from the section or list keyExtractor. getScrollAnchor returns these same keys.
+ * from the section or list keyExtractor. anchorVisibleContent accepts and returns these same keys.
  */
 export type SectionListRef = LegendListRef & {
     scrollToLocation(params: SectionListScrollParams): void;
