@@ -44,6 +44,7 @@ export interface LegendListScrollerRef {
     isScrollInRange?(): boolean;
     getContentNode?(): unknown;
     getMaxScrollOffset?(): number;
+    isWindowScroll?(): boolean;
     getNativeScrollRef?(): unknown;
     getScrollEventTarget?(): ScrollEventTargetLike | null;
     getScrollableNode(): ScrollableNodeLike | null;
@@ -80,6 +81,8 @@ export type ScrollResolve = (result?: LegendListScrollResult) => void;
 export interface ScrollTarget {
     averageSizeSnapshot?: Record<string, number>;
     animated?: boolean;
+    /** scrollToOffset can reach the contentContainerStyle minimum size, like native scroll views. */
+    clampToContentContainerMinSize?: boolean;
     index?: number;
     key?: string;
     isInitialScroll?: boolean;
@@ -173,6 +176,14 @@ export type AnchoredEndSpaceOwner = "list" | "scroll";
 // Keyboard integrations report occlusion separately from scroll-range insets.
 // This is an internal bridge, not part of the public list ref contract.
 export interface LegendListInternalRef extends LegendListRef {
+    /** Reveals a measured DOM element or text range inside a row. */
+    scrollElementIntoView(params: {
+        element: Element | Range;
+        viewPosition?: number;
+        animated?: boolean;
+        viewportMargin?: { top?: number; bottom?: number };
+    }): Promise<LegendListScrollResult>;
+
     reportViewabilityInsetEndInternal?: (inset: number) => void;
 }
 
@@ -334,6 +345,7 @@ export interface InternalState {
         anchoredEndSpaceOwner: AnchoredEndSpaceOwner;
         alwaysRender: AlwaysRenderConfig | undefined;
         contentContainerAlignItems: ViewStyle["alignItems"] | undefined;
+        contentContainerMinSize?: number;
         alwaysRenderIndicesArr: number[];
         alwaysRenderIndicesSet: Set<number>;
         contentInset: Insets | undefined;

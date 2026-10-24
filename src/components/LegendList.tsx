@@ -237,6 +237,13 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
         alignItemsAtEnd &&
         !useAlignItemsAtEndPadding &&
         (horizontal ? contentContainerStyleBase?.minWidth == null : contentContainerStyleBase?.minHeight == null);
+    const contentContainerMinSizeStyle = horizontal
+        ? contentContainerStyleBase?.minWidth
+        : contentContainerStyleBase?.minHeight;
+    const contentContainerMinSize =
+        typeof contentContainerMinSizeStyle === "number" && Number.isFinite(contentContainerMinSizeStyle)
+            ? contentContainerMinSizeStyle
+            : undefined;
     const contentContainerStyle: ViewStyle = {
         ...contentContainerStyleBase,
         ...(alignItemsAtEnd && !useAlignItemsAtEndPadding
@@ -521,6 +528,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
         anchoredEndSpaceOwner,
         animatedProps: animatedPropsInternal,
         contentContainerAlignItems: contentContainerStyle.alignItems,
+        contentContainerMinSize,
         contentInset,
         contentInsetEndAdjustment: contentInsetEndAdjustmentResolved,
         data: dataProp,
@@ -837,9 +845,10 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
             state.positionsAreCurrent = false;
             state.positionRecalculationStartIndex = 0;
             state.scrollForNextCalculateItemsInView = undefined;
-            state.triggerCalculateItemsInView?.({ forceFullItemPositions: true });
+            state.triggerCalculateItemsInView?.({ doMVCP: true, forceFullItemPositions: true });
+            if (state.props.maintainScrollAtEnd?.onItemLayout) doMaintainScrollAtEnd(ctx);
         }
-    }, [getFixedItemSize, extraData]);
+    }, [!!getFixedItemSize, extraData]);
 
     useLayoutEffect(() => {
         set$(ctx, "extraData", extraData);
@@ -857,7 +866,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
     useLayoutEffect(() => {
         state.lastMetrics = undefined;
         emitMetrics(ctx);
-    }, [ctx, onMetricsChange, trackScrollMetrics]);
+    }, [ctx, !!onMetricsChange, trackScrollMetrics]);
 
     useEffect(() => {
         const viewability = setupViewability({
@@ -883,7 +892,7 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
 
     useEffect(() => {
         return () => {
-            cancelImperativeScroll(state);
+            cancelImperativeScroll(state, "unreachable");
             state.scheduledWork.dispose();
         };
     }, [state]);

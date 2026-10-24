@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
+import { interruptUserScroll } from "../../src/core/cancelScroll";
 import { checkFinishedScroll, checkFinishedScrollFallback } from "../../src/core/checkFinishedScroll";
 import { Platform } from "../../src/platform/Platform";
 import { createMockContext } from "../__mocks__/createMockContext";
@@ -74,6 +75,58 @@ describe("checkFinishedScrollFallback", () => {
             expect(ctx.state.scrollingTo).toBeDefined();
         });
     }
+
+    it("keeps a moving explicit end request pending until the delayed native top event", () => {
+        Platform.OS = "ios";
+        const resolve = mock(() => {});
+        const scrollTo = mock(() => {});
+        const ctx = createMockContext(
+            { totalSize: 1000 },
+            {
+                didContainersLayout: true,
+                didFinishInitialScroll: true,
+                hasScrolled: true,
+                pendingScrollResolve: resolve,
+                positions: [0],
+                props: { data: ["row"], getFixedItemSize: () => 1000 },
+                refScroller: { current: { scrollTo } } as any,
+                scroll: 400,
+                scrollingTo: {
+                    animated: true,
+                    index: 0,
+                    isScrollToEnd: true,
+                    offset: 0,
+                    targetOffset: 800,
+                    viewPosition: 1,
+                },
+                scrollLength: 200,
+                scrollPending: 400,
+            },
+        );
+        let now = 1000;
+        const date = spyOn(Date, "now").mockImplementation(() => now);
+        try {
+            checkFinishedScrollFallback(ctx);
+            // A status-bar animation reverses the request without an early JS interruption event.
+            for (const offset of [500, 600, 650, 600, 500, 400, 300, 200, 100]) {
+                now += 100;
+                ctx.state.lastNativeScrollTime = now;
+                ctx.state.scroll = ctx.state.scrollPending = offset;
+                flushTimers(1);
+                expect(resolve).not.toHaveBeenCalled();
+            }
+            // UIKit's deceleration has sparse final frames before onScrollToTop.
+            // Retrying here restarts the end animation just before that callback cancels ownership.
+            now += 100;
+            flushTimers(1);
+            expect(scrollTo).not.toHaveBeenCalled();
+            expect(resolve).not.toHaveBeenCalled();
+            interruptUserScroll(ctx);
+            expect(resolve).toHaveBeenCalledWith({ reason: "interrupted" });
+        } finally {
+            date.mockRestore();
+        }
+    });
 
     it("waits longer on native initial non-zero scroll when no native scroll event is observed on Android", () => {
         Platform.OS = "android";
@@ -168,7 +221,7 @@ describe("checkFinishedScrollFallback", () => {
         expect(ctx.state.scrollingTo).toBeUndefined();
     });
 
-    it("settles an interrupted non-end request after observing native movement", () => {
+    it("reports an unaligned native request as unreachable after movement stops", () => {
         Platform.OS = "ios";
         const resolveScroll = mock(() => {});
         const ctx = createMockContext(
@@ -192,7 +245,7 @@ describe("checkFinishedScrollFallback", () => {
         checkFinishedScrollFallback(ctx);
         flushTimers(1);
 
-        expect(resolveScroll).toHaveBeenCalledTimes(1);
+        expect(resolveScroll).toHaveBeenCalledWith({ reason: "unreachable" });
         expect(ctx.state.pendingScrollResolve).toBeUndefined();
         expect(ctx.state.scrollingTo).toBeUndefined();
     });

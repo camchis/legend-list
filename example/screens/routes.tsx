@@ -76,6 +76,7 @@ import ProductShelfFixture from "~/screens/fixtures/product-shelf";
 import RTLHorizontalFixture from "~/screens/fixtures/rtl-horizontal";
 import ScrollRegressionQaFixture from "~/screens/fixtures/scroll-regression-qa";
 import SectionListFixedSizeFixture from "~/screens/fixtures/section-list-fixed-size";
+import StatusBarFollowFixture from "~/screens/fixtures/status-bar-follow";
 import VideoFeedFixture from "~/screens/fixtures/video-feed";
 import AiChatFixture from "./fixtures/ai-chat";
 
@@ -164,6 +165,15 @@ const DEBUGGING_ROUTE: RouteDefinition = {
 };
 
 export const FIXTURE_ROUTES: FixtureRouteDefinition[] = [
+    {
+        component: StatusBarFollowFixture,
+        description: "Tests end-follow ownership after an iOS status-bar tap scrolls to the top.",
+        groupKey: "scroll",
+        groupTitle: "Scroll & Position",
+        kind: "fixture",
+        slug: "status-bar-follow",
+        title: "Status Bar Follow",
+    },
     {
         component: KeyboardViewabilityFixture,
         description: "Compares reported viewable rows with the area left visible above a real keyboard.",

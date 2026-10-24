@@ -1,15 +1,18 @@
 import { settlePendingImperativeScroll } from "@/core/cancelImperativeScroll";
+import { cancelScroll } from "@/core/cancelScroll";
 import { interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import { type StateContext, set$ } from "@/state/state";
 import type { LegendListScrollResult } from "@/types.base";
 import type { ScrollResolve } from "@/types.internal";
 
+export type ScrollRequestRun = () => boolean | "unreachable";
+
 export interface ScrollRequestTracker {
     cancel(): void;
     isCurrent(token: number): boolean;
     isWaitingToRun(): boolean;
-    runNow(token: number, resolve: ScrollResolve, run: () => boolean): void;
-    runNowIfIdle(run: () => boolean): Promise<LegendListScrollResult>;
+    runNow(token: number, resolve: ScrollResolve, run: ScrollRequestRun): void;
+    runNowIfIdle(run: ScrollRequestRun): Promise<LegendListScrollResult>;
     start(resolve: ScrollResolve): number;
 }
 
@@ -22,6 +25,7 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
             const state = ctx.state;
             // A newer explicit target supersedes automatic end-follow intent.
             if (!isInternal) {
+                state.scheduledWork.cancel("appScrollRearm");
                 state.pendingEndMeasurements = undefined;
                 state.visibleContentAnchor = undefined;
                 state.scrollElementTarget = undefined;
@@ -39,7 +43,7 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
             return token;
         };
 
-        const runNow = (token: number, resolve: ScrollResolve, run: () => boolean) => {
+        const runNow = (token: number, resolve: ScrollResolve, run: ScrollRequestRun) => {
             const state = ctx.state;
             if (token !== currentToken) {
                 return;
@@ -47,6 +51,10 @@ export function getScrollRequestTracker(ctx: StateContext): ScrollRequestTracker
 
             waitingToken = undefined;
             const didStartScroll = run();
+            if (didStartScroll === "unreachable") {
+                cancelScroll(ctx, true, "unreachable");
+                return;
+            }
             if (!didStartScroll || !state.scrollingTo) {
                 if (state.pendingScrollResolve === resolve) {
                     state.pendingScrollResolve = undefined;

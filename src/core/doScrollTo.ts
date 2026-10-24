@@ -1,7 +1,7 @@
 import { EDGE_POSITION_EPSILON } from "@/constants";
 import { calculateOffsetForIndex } from "@/core/calculateOffsetForIndex";
 import { cancelScroll } from "@/core/cancelScroll";
-import { getCurrentTargetOffset } from "@/core/checkFinishedScroll";
+import { checkFinishedScrollFallback, getCurrentTargetOffset } from "@/core/checkFinishedScroll";
 import type { DoScrollToParams } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
 import { scrollTo } from "@/core/scrollTo";
@@ -37,7 +37,9 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
 
     const isAnimated = !!animated;
     const isHorizontal = !!horizontal;
-    const contentSize = isHorizontal ? getContentSize(ctx) : undefined;
+    const contentSize = isHorizontal
+        ? Math.max(getContentSize(ctx), state.props.contentContainerMinSize ?? 0)
+        : undefined;
     const left = isHorizontal ? toNativeHorizontalOffset(state, offset, contentSize) : 0;
     const top = isHorizontal ? 0 : offset;
     scroller.scrollTo({ animated: isAnimated, x: left, y: top });
@@ -71,13 +73,11 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
     state.scheduledWork.frame(() => {
         if (targetToken === state.scrollingTo) {
             const currentOffset = readOffset();
-            const landingOffset = targetToken
-                ? Math.min(
-                      getCurrentTargetOffset(ctx, targetToken),
-                      scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY,
-                  )
-                : offset;
-            if (
+            const targetOffset = targetToken ? getCurrentTargetOffset(ctx, targetToken) : offset;
+            const landingOffset = Math.min(targetOffset, scroller.getMaxScrollOffset?.() ?? Number.POSITIVE_INFINITY);
+            if (targetToken?.isInitialScroll && Math.abs(currentOffset - targetOffset) > EDGE_POSITION_EPSILON) {
+                checkFinishedScrollFallback(ctx);
+            } else if (
                 targetToken &&
                 !targetToken.isInitialScroll &&
                 (isAnimated || targetToken.landingRetries) &&
@@ -95,7 +95,7 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
                     if (ctx.scrollRequestTracker?.isWaitingToRun()) {
                         finishScrollTo(ctx);
                     } else {
-                        cancelScroll(ctx, false);
+                        cancelScroll(ctx, false, "unreachable");
                     }
                 } else {
                     retryLanding(ctx, targetToken, currentOffset, landingOffset);

@@ -165,6 +165,7 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
 
     /**
      * In case items always have a fixed size, you can provide a function to return it.
+     * Change extraData when the fixed sizes returned by this callback change.
      */
     getFixedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
 
@@ -507,10 +508,11 @@ export interface ScrollToEndOptions {
 
 /**
  * Resolved value of imperative scroll promises. Undefined means the list landed on the target;
- * a reason means it stopped first because the user scrolled or it was programmatically cancelled or replaced.
+ * a reason means it was interrupted by user input, superseded by cancellation/replacement,
+ * or unreachable because the target cannot be reached, the data was replaced, or the list unmounted.
  * The void member keeps existing `Promise<void>` implementations assignable.
  */
-export type LegendListScrollResult = { reason: "interrupted" | "superseded" } | void;
+export type LegendListScrollResult = { reason: "interrupted" | "superseded" | "unreachable" } | void;
 
 export interface AnchoredEndSpaceConfig {
     /** Index of the item whose row should remain anchored when trailing space is added. */
@@ -642,19 +644,12 @@ export type LegendListState = {
 export type LegendListRef = {
     /** Cancels queued and active scrolling, settles its promise, and stops at the observed offset. */
     cancelScroll(): void;
-    /** Scrolls by stable item identity, retaining that target through prepends. */
+    /** Scrolls by stable item identity through prepends; resolves unreachable if the key is missing or removed. */
     scrollToKey(params: {
         key: string;
         animated?: boolean;
         viewOffset?: number;
         viewPosition?: number;
-    }): Promise<LegendListScrollResult>;
-    /** Reveals a measured DOM element or text range inside a row. */
-    scrollElementIntoView(params: {
-        element: Element | Range;
-        viewPosition?: number;
-        animated?: boolean;
-        viewportMargin?: { top?: number; bottom?: number };
     }): Promise<LegendListScrollResult>;
     /** Captures the first visible item and its viewport offset after initial placement is ready. */
     getScrollAnchor(): { key: string; offset: number } | undefined;

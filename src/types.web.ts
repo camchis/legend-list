@@ -5,6 +5,7 @@ import type { LooseLayoutChangeEvent, LooseScrollViewProps } from "@/platform/sc
 import type {
     AnchoredEndSpaceConfig,
     LegendListRef as LegendListRefBase,
+    LegendListScrollResult,
     LegendListState as LegendListStateBase,
     NativeScrollEvent,
     NativeSyntheticEvent,
@@ -100,6 +101,13 @@ export type LegendListRef = Omit<
     LegendListRefBase,
     "getAnimatableRef" | "getNativeScrollRef" | "getScrollableNode" | "getScrollResponder"
 > & {
+    /** Reveals an element or range; resolves unreachable if it is detached or has no scroll surface. */
+    scrollElementIntoView(params: {
+        element: Element | Range;
+        viewPosition?: number;
+        animated?: boolean;
+        viewportMargin?: { top?: number; bottom?: number };
+    }): Promise<LegendListScrollResult>;
     getAnimatableRef(): HTMLElement | ScrollViewMethods;
     getNativeScrollRef(): HTMLElement | ScrollViewMethods;
     getScrollableNode(): HTMLElement | null;

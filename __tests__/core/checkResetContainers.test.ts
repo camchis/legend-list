@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
 import * as calculateItemsInViewModule from "../../src/core/calculateItemsInView";
@@ -46,6 +46,19 @@ describe("checkResetContainers", () => {
         calculateItemsInViewSpy.mockRestore();
         doMaintainScrollAtEndSpy.mockRestore();
         checkThresholdsSpy.mockRestore();
+    });
+
+    it("skips key extraction for an unchanged reference prefix in append mode", () => {
+        const previousData = Array.from({ length: 5000 }, (_, id) => ({ id }));
+        const data = [...previousData, { id: 5000 }];
+        const keyExtractor = mock((item: { id: number }) => String(item.id));
+        state.previousData = previousData;
+        state.props.data = data;
+        state.props.keyExtractor = keyExtractor;
+        state.props.maintainScrollAtEnd = { on: { dataChange: "append", itemLayout: true } };
+        checkResetContainers(ctx, data);
+        expect(keyExtractor).not.toHaveBeenCalled();
+        expect(doMaintainScrollAtEndSpy).toHaveBeenCalled();
     });
 
     it("resets end reached state and boundary checks when maintainScrollAtEnd is disabled", () => {

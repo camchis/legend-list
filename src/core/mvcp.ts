@@ -294,7 +294,7 @@ export function prepareMVCP(
                 return undefined;
             }
             // If we're currently scrolling to a target index, do MVCP for its position
-            targetId = getId(state, scrollTarget);
+            targetId = scrollingTo?.key ?? getId(state, scrollTarget);
         } else if (idsInView.length > 0 && state.didContainersLayout && !dataChanged) {
             // Do MVCP for the first item fully in view
             targetId = idsInView.find((id) => indexByKey.get(id) !== undefined);
@@ -323,6 +323,10 @@ export function prepareMVCP(
 
         // Return a function to do MVCP based on the prepared values
         return () => {
+            // A keyed redispatch already accounts for the rebuilt target's position and alignment.
+            if (scrollTarget !== undefined && state.scrollingTo !== scrollingTo) {
+                return;
+            }
             let positionDiff = 0;
             let anchorIdForLock = anchorLock?.id;
             let anchorPositionForLock: number | undefined;
@@ -419,7 +423,8 @@ export function prepareMVCP(
                 scrollingToViewPosition !== undefined &&
                 (scrollingToViewPosition > 0 || scrollingTo.viewPositionFallback)
             ) {
-                const newSize = getItemSize(ctx, targetId!, scrollTarget!, state.props.data[scrollTarget!]);
+                const targetIndex = scrollingTo.index!;
+                const newSize = getItemSize(ctx, targetId!, targetIndex, state.props.data[targetIndex]);
                 const prevSize = scrollingTo.itemSize;
                 if (newSize !== undefined && prevSize !== undefined && newSize !== prevSize) {
                     if (scrollingTo.viewPositionFallback) {

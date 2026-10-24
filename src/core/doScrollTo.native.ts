@@ -27,7 +27,9 @@ export function doScrollTo(ctx: StateContext, params: DoScrollToParams) {
     }
 
     const isHorizontal = !!horizontal;
-    const contentSize = isHorizontal ? getContentSize(ctx) : undefined;
+    const contentSize = isHorizontal
+        ? Math.max(getContentSize(ctx), state.props.contentContainerMinSize ?? 0)
+        : undefined;
     const nativeOffset = toNativeHorizontalOffset(state, offset, contentSize);
 
     scroller.scrollTo({

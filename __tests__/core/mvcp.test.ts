@@ -15,6 +15,40 @@ describe("mvcp helpers", () => {
         Platform.OS = originalPlatform;
     });
 
+    it("keeps the keyed scroll target across a prepend before the key map is rebuilt", () => {
+        Platform.OS = "web";
+        const ctx = createMockContext(
+            { totalSize: 1000 },
+            {
+                indexByKey: new Map([
+                    ["a", 0],
+                    ["b", 1],
+                    ["c", 2],
+                ]),
+                positions: [0, 100, 200],
+                props: {
+                    data: [{ id: "new" }, { id: "a" }, { id: "b" }, { id: "c" }],
+                    getFixedItemSize: (item: { id: string }) => (item.id === "b" ? 200 : 100),
+                    keyExtractor: (item: { id: string }) => item.id,
+                    maintainVisibleContentPosition: normalizeMaintainVisibleContentPosition(true),
+                },
+                scroll: 100,
+                scrollingTo: { animated: true, index: 1, itemSize: 200, key: "b", offset: 100, viewPosition: 0.5 },
+            },
+        );
+        const adjust = prepareMVCP(ctx, true);
+        ctx.state.indexByKey.clear();
+        for (const [index, item] of ctx.state.props.data.entries()) ctx.state.indexByKey.set(item.id, index);
+        ctx.state.positions.splice(0, 0, 0);
+        ctx.state.positions[1] = 100;
+        ctx.state.positions[2] = 200;
+        ctx.state.positions[3] = 300;
+        adjust?.();
+        expect(ctx.state.scrollingTo?.index).toBe(2);
+        expect(ctx.state.scroll).toBe(200);
+        ctx.state.scheduledWork.dispose();
+    });
+
     it("does not restore native row positions while both restoration modes are disabled", () => {
         Platform.OS = "ios";
         const ctx = createMockContext(

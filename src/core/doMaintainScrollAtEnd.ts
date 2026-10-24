@@ -1,3 +1,4 @@
+import { USER_MOMENTUM_STALL_TIMEOUT_MS } from "@/constants";
 import { cancelImperativeScroll } from "@/core/cancelImperativeScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
 import { isEndOfContentTarget } from "@/core/endOfContentTarget";
@@ -7,10 +8,14 @@ import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";
 import { getContentSize } from "@/state/getContentSize";
 import { peek$, type StateContext, set$ } from "@/state/state";
+import type { LegendListScrollResult } from "@/types.base";
 import { areKnownOrFixedItemSizesAvailable } from "@/utils/getItemSize";
 import { requestAdjust } from "@/utils/requestAdjust";
 
-export function interruptMaintainScrollAtEnd(ctx: StateContext, reason: "interrupted" | "superseded" = "interrupted") {
+export function interruptMaintainScrollAtEnd(
+    ctx: StateContext,
+    reason: Exclude<LegendListScrollResult, void>["reason"] = "interrupted",
+) {
     const { state } = ctx;
     const maintaining = state.maintainingScrollAtEnd;
     state.endFollowInterrupted = true;
@@ -30,6 +35,15 @@ export function interruptMaintainScrollAtEnd(ctx: StateContext, reason: "interru
     return cancelActiveScroll;
 }
 
+// App native commands have no list request or drag owner. Hold rearming through their scroll events.
+export function armAppScrollRearm(ctx: StateContext) {
+    ctx.state.scheduledWork.timeout(
+        () => rearmEndFollowIfSettled(ctx),
+        USER_MOMENTUM_STALL_TIMEOUT_MS,
+        "appScrollRearm",
+    );
+}
+
 // Once no reader anchor or scroll owns the position, settling within the threshold re-arms following.
 export function rearmEndFollowIfSettled(ctx: StateContext) {
     const { state } = ctx;
@@ -39,6 +53,7 @@ export function rearmEndFollowIfSettled(ctx: StateContext) {
         !state.isDragging &&
         !state.isMomentumScrolling &&
         !state.scheduledWork.has("endFollowRearm") &&
+        !state.scheduledWork.has("appScrollRearm") &&
         !state.scrollingTo &&
         !state.pendingScrollResolve &&
         !ctx.scrollRequestTracker?.isWaitingToRun() &&

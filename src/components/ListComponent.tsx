@@ -9,6 +9,7 @@ import { getAutoOtherAxisStyle } from "@/components/listComponentStyles";
 import { ScrollAdjust } from "@/components/ScrollAdjust";
 import { SnapWrapper } from "@/components/SnapWrapper";
 import { ENABLE_DEVMODE } from "@/constants";
+import { interruptUserScroll } from "@/core/cancelScroll";
 import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import type { ScrollAdjustHandler } from "@/core/ScrollAdjustHandler";
 import { setFooterSize, setHeaderSize } from "@/core/updateContentMetrics";
@@ -106,6 +107,7 @@ export const ListComponent = typedMemo(function ListComponent<ItemT>({
     ItemSeparatorComponent,
     alignItemsAtEnd: _alignItemsAtEnd,
     onScroll,
+    onScrollToTop,
     onLayout,
     ListHeaderComponent,
     ListHeaderComponentStyle,
@@ -184,6 +186,14 @@ export const ListComponent = typedMemo(function ListComponent<ItemT>({
         }
     }, [ListHeaderComponent, ListFooterComponent, ctx, updateFooterSize]);
 
+    const onScrollToTopInternal = useCallback(
+        (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            interruptUserScroll(ctx);
+            onScrollToTop?.(event);
+        },
+        [ctx, onScrollToTop],
+    );
+
     const onLayoutHeader = useCallback(
         (rect: LayoutRectangle) => {
             const size = rect[horizontal ? "width" : "height"];
@@ -209,7 +219,11 @@ export const ListComponent = typedMemo(function ListComponent<ItemT>({
                 ? ScrollComponent === ListComponentScrollView
                     ? { onInternalScrollEnd, scrollElement, useWindowScroll }
                     : {}
-                : { onScrollBeginDrag: onInternalScrollBeginDrag, onScrollEndDrag: onInternalScrollEndDrag })}
+                : {
+                      onScrollBeginDrag: onInternalScrollBeginDrag,
+                      onScrollEndDrag: onInternalScrollEndDrag,
+                      onScrollToTop: onScrollToTopInternal,
+                  })}
             contentContainerStyle={[
                 horizontal ? { height: "100%" } : {},
                 contentContainerStyle,

@@ -1,5 +1,6 @@
 import { addTotalSize } from "@/core/addTotalSize";
 import { cancelScrollCompletionChecks } from "@/core/cancelImperativeScroll";
+import { cancelScroll } from "@/core/cancelScroll";
 import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import { finishInitialScroll } from "@/core/finishInitialScroll";
 import { recalculateSettledScroll } from "@/core/recalculateSettledScroll";
@@ -9,6 +10,12 @@ import { type StateContext, set$ } from "@/state/state";
 export function finishScrollTo(ctx: StateContext) {
     const state = ctx.state;
     if (state?.scrollingTo) {
+        const element = state.scrollElementTarget?.element;
+        const ancestor = element && ("commonAncestorContainer" in element ? element.commonAncestorContainer : element);
+        if (ancestor && !ancestor.isConnected && !ctx.scrollRequestTracker?.isWaitingToRun()) {
+            cancelScroll(ctx, false, "unreachable");
+            return;
+        }
         cancelScrollCompletionChecks(state);
         // An older active scroll can finish while its replacement still waits for layout.
         // Its completion must not settle or release the newer request's ownership.

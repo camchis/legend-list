@@ -17,6 +17,22 @@ describe("doScrollTo (native)", () => {
         Platform.OS = originalPlatform;
     });
 
+    it.each(["ios", "android"] as const)("uses the minWidth extent for %s RTL offsets", (platform) => {
+        Platform.OS = platform;
+        const scrollTo = mock();
+        const ctx = createMockContext(
+            { totalSize: 300 },
+            {
+                props: { contentContainerMinSize: 2000, data: [], horizontal: true, rtl: true },
+                refScroller: { current: { scrollTo } } as any,
+                scrollLength: 300,
+            },
+        );
+        doScrollTo(ctx, { animated: true, horizontal: true, offset: 1400 });
+        expect(scrollTo).toHaveBeenCalledWith({ animated: true, x: 300, y: 0 });
+        ctx.state.scheduledWork.dispose();
+    });
+
     it("uses the Android RTL default before the native horizontal mode is detected", () => {
         Platform.OS = "android";
         const scrollTo = mock();

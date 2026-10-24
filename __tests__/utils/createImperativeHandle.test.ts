@@ -222,7 +222,7 @@ describe("createImperativeHandle.scrollToEnd", () => {
             },
         );
 
-        expect(createImperativeHandle(ctx).getAnimatableRef()).toBe(nativeScrollRef);
+        expect(createImperativeHandle(ctx).getAnimatableRef().__nativeTag).toBe(7);
     });
 
     it("falls back to the scroller as the animatable ref", () => {
@@ -240,7 +240,8 @@ describe("createImperativeHandle.scrollToEnd", () => {
             },
         );
 
-        expect(createImperativeHandle(ctx).getAnimatableRef()).toBe(scroller);
+        const handle = createImperativeHandle(ctx);
+        expect(handle.getAnimatableRef()).toBe(handle.getNativeScrollRef());
     });
 
     it("does not mark synthetic content inset reports as scroll progress", () => {
@@ -1532,5 +1533,85 @@ describe("createImperativeHandle.scrollIndexIntoView", () => {
             expect.anything(),
             expect.objectContaining({ index: 12, viewPosition: 1 }),
         );
+    });
+});
+
+describe("app native scroll refs", () => {
+    for (const method of [
+        "scrollTo",
+        "scrollToEnd",
+        "scrollToOffset",
+        "scrollResponderScrollTo",
+        "scrollResponderScrollNativeHandleToKeyboard",
+        "scrollResponderZoomTo",
+    ] as const) {
+        it(`binds ${method}, preserves the surface, and supersedes queued list navigation`, async () => {
+            Platform.OS = "ios";
+            const ctx = createMockContext({ isFollowingEnd: true }, { didFinishInitialScroll: true });
+            const handle = createImperativeHandle(ctx, () => {});
+            const pending = handle.scrollToEnd({ animated: true });
+            const raw = {
+                __nativeTag: 42,
+                getNativeScrollRef() {
+                    return this;
+                },
+                getScrollResponder() {
+                    return this;
+                },
+                measure() {
+                    return this.__nativeTag;
+                },
+                scrollResponderScrollNativeHandleToKeyboard() {
+                    return this.__nativeTag;
+                },
+                scrollResponderScrollTo() {
+                    return this.__nativeTag;
+                },
+                scrollResponderZoomTo() {
+                    return this.__nativeTag;
+                },
+                scrollTo() {
+                    return this.__nativeTag;
+                },
+                scrollToEnd() {
+                    return this.__nativeTag;
+                },
+                scrollToOffset() {
+                    return this.__nativeTag;
+                },
+            };
+            ctx.state.refScroller.current = raw as any;
+            const appRef = handle.getNativeScrollRef();
+            expect(appRef).toBe(handle.getNativeScrollRef());
+            expect(appRef.getNativeScrollRef()).toBe(appRef);
+            expect(handle.getScrollResponder()).toBe(appRef);
+            expect(appRef.measure()).toBe(42);
+            expect(appRef.__nativeTag).toBe(42);
+            const command = appRef[method];
+            expect(command).toBe(appRef[method]);
+            expect(command({ animated: false, y: 0 })).toBe(42);
+            expect(await pending).toEqual({ reason: "superseded" });
+            expect(handle.getState().isFollowingEnd).toBe(false);
+            expect(ctx.state.pendingScrollToEnd).toBeUndefined();
+            expect(ctx.state.refScroller.current).toBe(raw);
+        });
+    }
+
+    it("uses the same wrapper for both getters and replaces it when the native instance changes", () => {
+        Platform.OS = "android";
+        const ctx = createMockContext();
+        const handle = createImperativeHandle(ctx);
+        ctx.state.refScroller.current = { scrollTo: () => {} } as any;
+        const first = handle.getNativeScrollRef();
+        expect(handle.getAnimatableRef()).toBe(first);
+        ctx.state.refScroller.current = { scrollTo: () => {} } as any;
+        expect(handle.getNativeScrollRef()).not.toBe(first);
+        expect(handle.getAnimatableRef()).toBe(handle.getNativeScrollRef());
+    });
+
+    it("keeps web refs unchanged", () => {
+        Platform.OS = "web";
+        const ctx = createMockContext();
+        expect(createImperativeHandle(ctx).getNativeScrollRef()).toBe(ctx.state.refScroller.current);
     });
 });

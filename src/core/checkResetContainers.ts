@@ -39,6 +39,7 @@ export function checkResetContainers(
         !!previousData &&
         dataProp.length > previousData.length &&
         previousData.every((item, index) => {
+            if (item === dataProp[index]) return true;
             const key = state.props.keyExtractor?.(item, index) ?? index;
             return key === getId(state, index);
         });

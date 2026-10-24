@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import "../setup";
+import { useState } from "react";
 import { RefreshControl, Text } from "react-native";
 
 import { act, render } from "../helpers/testingLibrary";
@@ -130,8 +131,83 @@ beforeEach(() => {
 });
 
 describe("LegendList props behavior", () => {
+    it("does not recalculate all fixed sizes for an equivalent inline callback", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?fixed-inline-stable");
+        const data = Array.from({ length: 100 }, (_, id) => ({ id }));
+        const sizes = mock(() => 100);
+        const list = () => <LegendList data={data} getFixedItemSize={() => sizes()} renderItem={() => null} />;
+        const rendered = render(list());
+        act(() => lastListProps.onLayout(layoutEvent));
+        await flushAsync();
+        sizes.mockClear();
+        rendered.rerender(list());
+        expect(sizes).not.toHaveBeenCalled();
+        rendered.unmount();
+    });
+
+    it("preserves the visible anchor when extraData changes fixed sizes", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?fixed-mvcp-refresh");
+        const data = [{ id: "a" }, { id: "b" }, { id: "c" }];
+        let size = 100;
+        const getFixedItemSize = (item: { id: string }) => (item.id === "a" ? size : 100);
+        const list = (extraData: number) => (
+            <LegendList
+                data={data}
+                extraData={extraData}
+                getFixedItemSize={getFixedItemSize}
+                keyExtractor={(item) => item.id}
+                maintainVisibleContentPosition
+                renderItem={() => null}
+            />
+        );
+        const rendered = render(list(0));
+        act(() => lastListProps.onLayout(layoutEvent));
+        await flushAsync();
+        const ctx = await getContextFromRender();
+        ctx.state.didContainersLayout = true;
+        ctx.state.idsInView = ["b"];
+        ctx.state.scroll = 100;
+        requestAdjustCalls = [];
+        size = 150;
+        rendered.rerender(list(1));
+        expect(ctx.state.positions).toEqual([0, 150, 250]);
+        expect(requestAdjustCalls).toContain(50);
+        rendered.unmount();
+    });
+
+    it("follows the end when extraData refreshes fixed sizes", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?fixed-end-refresh");
+        const data = ["a", "b", "c"];
+        let size = 100;
+        const getFixedItemSize = () => size;
+        const list = (extraData: number) => (
+            <LegendList
+                data={data}
+                extraData={extraData}
+                getFixedItemSize={getFixedItemSize}
+                maintainScrollAtEnd
+                renderItem={() => null}
+            />
+        );
+        const rendered = render(list(0));
+        act(() => lastListProps.onLayout(layoutEvent));
+        await flushAsync();
+        const ctx = await getContextFromRender();
+        ctx.state.didContainersLayout = true;
+        ctx.state.didFinishInitialScroll = true;
+        ctx.state.scrollingTo = undefined;
+        ctx.state.scroll = 100;
+        set$(ctx, "isFollowingEnd", true);
+        scrollToCalls = [];
+        size = 150;
+        rendered.rerender(list(1));
+        await flushAsync();
+        expect(scrollToCalls).toContainEqual(expect.objectContaining({ index: 2, viewPosition: 1 }));
+        rendered.unmount();
+    });
+
     for (const change of ["callback", "extraData"] as const) {
-        it(`refreshes offscreen fixed-size positions when ${change} changes without MVCP`, async () => {
+        it(`refreshes offscreen fixed-size positions when extraData changes with ${change} sizing without MVCP`, async () => {
             const data = [{ id: "a" }, { id: "b" }, { id: "c" }];
             let fixedSize: number | undefined;
             const getFixedItemSize = () => fixedSize;
@@ -141,7 +217,7 @@ describe("LegendList props behavior", () => {
                     data={data}
                     drawDistance={0}
                     estimatedItemSize={100}
-                    extraData={change === "extraData" ? version : undefined}
+                    extraData={version}
                     getFixedItemSize={change === "callback" ? () => fixedSize : getFixedItemSize}
                     keyExtractor={(item: { id: string }) => item.id}
                     maintainVisibleContentPosition={false}
@@ -2068,17 +2144,41 @@ describe("LegendList props behavior", () => {
         rendered.unmount();
     });
 
-    it("emits current geometry when the metrics subscriber changes without a layout change", async () => {
+    it("settles an inline metrics callback that updates parent state", async () => {
+        const { LegendList } = await import("../../src/components/LegendList?metrics-inline-state");
+        const data = ["row"];
+        let emissions = 0;
+        function Parent() {
+            const [, setMetrics] = useState<unknown>();
+            return (
+                <LegendList
+                    data={data}
+                    onMetricsChange={(metrics) => {
+                        emissions++;
+                        if (emissions > 10) throw new Error("metrics callback render loop");
+                        setMetrics(metrics);
+                    }}
+                    renderItem={() => null}
+                />
+            );
+        }
+        const rendered = render(<Parent />);
+        await flushAsync();
+        expect(emissions).toBe(1);
+        rendered.unmount();
+    });
+
+    it("emits current geometry when a metrics subscriber is added", async () => {
         const { LegendList } = await import("../../src/components/LegendList?metrics-subscriber-replacement");
         const data = ["row"];
         const renderItem = () => null;
         const first = mock(() => {});
         const next = mock(() => {});
-        const list = (onMetricsChange: typeof first) => (
+        const list = (onMetricsChange: typeof first | undefined) => (
             <LegendList data={data} onMetricsChange={onMetricsChange} renderItem={renderItem} />
         );
-        const rendered = render(list(first));
-        expect(first).toHaveBeenCalled();
+        const rendered = render(list(undefined));
+        expect(first).not.toHaveBeenCalled();
         await act(async () => {
             rendered.rerender(list(next));
         });

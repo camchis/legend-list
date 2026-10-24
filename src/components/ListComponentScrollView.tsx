@@ -21,6 +21,7 @@ import { IS_DEV } from "@/utils/devEnvironment";
 import { hasActiveInitialScroll } from "@/utils/hasActiveInitialScroll";
 import { warnDevOnce } from "@/utils/helpers";
 import { isInMVCPActiveMode } from "@/utils/isInMVCPActiveMode";
+import { isHorizontalRTL, peekLogicalHorizontalOffset } from "@/utils/rtl";
 import { useRafCoalescer } from "@/utils/useRafCoalescer";
 import { observeScrollLayout } from "./observeScrollLayout";
 import {
@@ -356,10 +357,10 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
             const state = ctx.state;
             if (
                 !hasActiveInitialScroll(state) &&
-                (state.maintainingScrollAtEnd ||
-                    state.pendingMaintainScrollAtEnd ||
-                    state.scrollingTo?.isScrollToEnd) &&
-                getCurrentScrollOffset() < clampOffset(state.scroll, getMaxScrollOffset()) - 1
+                !state.scrollingTo &&
+                (state.maintainingScrollAtEnd || state.pendingMaintainScrollAtEnd) &&
+                peekLogicalHorizontalOffset(state, getCurrentScrollOffset(), getMaxScrollOffset()) <
+                    clampOffset(state.scroll, getMaxScrollOffset()) - 1
             ) {
                 interruptUserScroll(ctx);
             }
@@ -430,7 +431,7 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
             if (direction > 0 && !isExplicitNavigation) return;
             const node = resolveScrollableNode(scrollRef.current, externalTarget);
             const maxOffset = getMaxScrollOffset();
-            const offset = getCurrentScrollOffset();
+            const offset = peekLogicalHorizontalOffset(state, getCurrentScrollOffset(), maxOffset);
             if (
                 !event.defaultPrevented &&
                 node &&
@@ -442,10 +443,11 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
                 interruptUserScroll(ctx);
             }
         };
+        const inputDirection = (delta: number) => (isHorizontalRTL(ctx.state) ? -delta : delta);
         const onWheel = (nativeEvent: Event) => {
             const event = nativeEvent as WheelEvent;
             const delta = horizontal ? event.deltaX || (event.shiftKey ? event.deltaY : 0) : event.deltaY;
-            if (delta !== 0 && !event.ctrlKey && !event.defaultPrevented) interrupt(event, delta);
+            if (delta !== 0 && !event.ctrlKey && !event.defaultPrevented) interrupt(event, inputDirection(delta));
         };
         let lastTouch: number | undefined;
         const onTouchStart = (nativeEvent: Event) => {
@@ -459,7 +461,8 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
             const touch = (nativeEvent as TouchEvent).touches[0];
             if (!touch) return;
             const position = horizontal ? touch.clientX : touch.clientY;
-            if (lastTouch !== undefined && position !== lastTouch) interrupt(nativeEvent, lastTouch - position);
+            if (lastTouch !== undefined && position !== lastTouch)
+                interrupt(nativeEvent, inputDirection(lastTouch - position));
             lastTouch = position;
         };
         const onKeyDown = (nativeEvent: Event) => {
@@ -472,7 +475,9 @@ export const ListComponentScrollView = forwardRef(function ListComponentScrollVi
                 )
             )
                 return;
-            if (
+            if (horizontal && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+                interrupt(event, inputDirection(event.key === "ArrowLeft" ? -1 : 1));
+            } else if (
                 (horizontal ? event.key === "ArrowLeft" : event.key === "ArrowUp") ||
                 event.key === "PageUp" ||
                 event.key === "Home" ||

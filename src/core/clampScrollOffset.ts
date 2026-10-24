@@ -5,7 +5,8 @@ import type { ScrollTarget } from "@/types.internal";
 
 export function clampScrollOffset(ctx: StateContext, offset: number, scrollTarget?: Partial<ScrollTarget>) {
     const state = ctx.state;
-    const contentSize = getContentSize(ctx);
+    const minSize = scrollTarget?.clampToContentContainerMinSize ? state.props.contentContainerMinSize : undefined;
+    const contentSize = minSize === undefined ? getContentSize(ctx) : Math.max(getContentSize(ctx), minSize);
     let clampedOffset = offset;
     if (
         Number.isFinite(contentSize) &&
@@ -13,7 +14,9 @@ export function clampScrollOffset(ctx: StateContext, offset: number, scrollTarge
         (Platform.OS !== "android" || state.lastLayout)
     ) {
         const baseMaxOffset = Math.max(0, contentSize - state.scrollLength);
-        const viewOffset = scrollTarget?.viewOffset;
+        // Web initial placement must finish at the reachable content extent.
+        const viewOffset =
+            Platform.OS === "web" && scrollTarget?.isInitialScroll ? undefined : scrollTarget?.viewOffset;
         const extraEndOffset = typeof viewOffset === "number" && viewOffset < 0 ? -viewOffset : 0;
         const maxOffset = baseMaxOffset + extraEndOffset;
         clampedOffset = Math.min(offset, maxOffset);

@@ -778,7 +778,7 @@ for (const mode of ["vertical LTR", "horizontal LTR", "negative RTL", "inverted 
             const scroll = trackScroll(h.ref.scrollToOffset({ animated: true, offset: 1250 }));
             await runUntilResolved(h, scroll);
             expect(scroll.resolved).toBe(true);
-            expect(scroll.value).toEqual({ reason: "superseded" });
+            expect(scroll.value).toEqual({ reason: "unreachable" });
             expect(h.browser.offset).toBe(1000);
             expect(h.scrollToCalls).toHaveLength(3);
             h.clock.advance(5000);

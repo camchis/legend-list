@@ -41,6 +41,9 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
     const ScrollSurface = React.forwardRef(function MomentumScrollSurface(props: any, forwardedRef: React.Ref<any>) {
         scrollProps = props;
         React.useImperativeHandle(forwardedRef, () => ({
+            getScrollResponder() {
+                return this;
+            },
             measure: () => {},
             scrollTo: (options: { animated: boolean; y: number }) => writes.push(options),
         }));
@@ -59,6 +62,7 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
             onMomentumScrollEnd={() => events.push("momentumEnd")}
             onScrollBeginDrag={() => events.push("dragBegin")}
             onScrollEndDrag={() => events.push("dragEnd")}
+            onScrollToTop={() => events.push("scrollToTop")}
             recycleItems={false}
             ref={ref}
             renderItem={({ item }: { item: { id: string } }) => <Text>{item.id}</Text>}
@@ -106,6 +110,7 @@ async function mountFollowingList(listOptions?: { mvcpData?: boolean }) {
         },
         ref,
         scroll,
+        scrollToTop: () => act(() => scrollProps.onScrollToTop(event(0))),
         unmount: rendered.unmount,
         writes,
     };
@@ -116,6 +121,147 @@ describe("native end following during momentum", () => {
         // Bun resolves .ts by default; Metro resolves this dependency to .native.ts.
         spyOn(platformScroll, "doScrollTo").mockImplementation(doNativeScrollTo);
     });
+
+    it("releases end following after a status-bar scroll and preserves the app callback", async () => {
+        const list = await mountFollowingList();
+        act(() => {
+            void list.ref.current!.scrollToEnd({ animated: false });
+        });
+        await flushFrames();
+        list.scroll(700);
+        await flushFrames();
+        expect(list.ref.current!.getState().isFollowingEnd).toBe(true);
+        list.writes.length = 0;
+        list.scroll(0);
+        list.scrollToTop();
+        await list.append();
+        expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
+        expect(list.ref.current!.getState().scroll).toBe(0);
+        expect(list.writes).toEqual([]);
+        expect(list.events).toEqual(["scrollToTop"]);
+        list.unmount();
+    });
+
+    it("resolves an active end request as unreachable on unmount", async () => {
+        const list = await mountFollowingList();
+        list.scroll(200);
+        let result: unknown = "pending";
+        act(() => {
+            void list.ref.current!.scrollToEnd({ animated: true }).then((value) => {
+                result = value;
+            });
+        });
+        await flushFrames();
+        expect(result).toBe("pending");
+        list.unmount();
+        await Promise.resolve();
+        expect(result).toEqual({ reason: "unreachable" });
+    });
+
+    for (const getter of ["getNativeScrollRef", "getAnimatableRef", "getScrollResponder"] as const) {
+        for (const animated of [false, true]) {
+            it(`releases following for an app command through ${getter} (animated: ${animated}) without wrapping internal dispatch`, async () => {
+                const list = await mountFollowingList();
+                try {
+                    const nativeRef = list.ref.current![getter]();
+                    expect(list.ref.current![getter]()).toBe(nativeRef);
+                    act(() => {
+                        void list.ref.current!.scrollToEnd({ animated: false });
+                    });
+                    await flushFrames();
+                    list.scroll(700);
+                    await flushFrames();
+                    expect(list.ref.current!.getState().isFollowingEnd).toBe(true);
+                    await list.append();
+                    expect(list.writes.some(({ y }) => y === 750)).toBe(true);
+                    list.scroll(750);
+                    await flushFrames();
+                    act(() => nativeRef.scrollTo({ animated, y: 0 }));
+                    if (animated) {
+                        // Native animations emit frames near the old end before leaving its threshold.
+                        for (const offset of [745, 740, 730]) {
+                            list.scroll(offset);
+                            await flushFrames();
+                            expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
+                        }
+                        list.writes.length = 0;
+                        await list.append();
+                        expect(list.writes).toEqual([]);
+                    }
+                    list.scroll(0);
+                    await flushFrames();
+                    expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
+                    list.writes.length = 0;
+                    await list.append();
+                    expect(list.writes).toEqual([]);
+                    expect(list.ref.current!.getState().scroll).toBe(0);
+                } finally {
+                    list.unmount();
+                }
+            });
+        }
+    }
+
+    it("rearms after an app command settles at the end", async () => {
+        const list = await mountFollowingList();
+        try {
+            act(() => list.ref.current!.getNativeScrollRef().scrollTo({ animated: true, y: 700 }));
+            list.scroll(700);
+            expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
+            await act(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 600));
+            });
+            expect(list.ref.current!.getState().isFollowingEnd).toBe(true);
+            list.writes.length = 0;
+            await list.append();
+            expect(list.writes.some(({ y }) => y === 750)).toBe(true);
+        } finally {
+            list.unmount();
+        }
+    });
+
+    for (const queued of [true, false]) {
+        for (const interruption of ["status-bar", "drag"] as const) {
+            it(`cancels a ${queued ? "queued" : "running"} explicit scrollToEnd on ${interruption} interruption`, async () => {
+                const list = await mountFollowingList();
+                try {
+                    list.scroll(200);
+                    let result: unknown = "pending";
+                    const interrupt = () => {
+                        list.scroll(0);
+                        if (interruption === "status-bar") list.scrollToTop();
+                        else list.beginDrag();
+                    };
+                    act(() => {
+                        void list.ref.current!.scrollToEnd({ animated: true }).then((value) => {
+                            result = value;
+                        });
+                        if (queued) {
+                            expect(list.writes).toEqual([]);
+                            interrupt();
+                        }
+                    });
+                    if (!queued) {
+                        await flushFrames();
+                        expect(result).toBe("pending");
+                        expect(list.writes.some(({ y }) => y === 700)).toBe(true);
+                        interrupt();
+                    }
+                    await flushFrames();
+                    expect(result).toEqual({ reason: "interrupted" });
+                    expect(list.events).toContain(interruption === "status-bar" ? "scrollToTop" : "dragBegin");
+                    expect(list.ref.current!.getState().isFollowingEnd).toBe(false);
+                    list.writes.length = 0;
+                    if (interruption === "drag") list.endDrag();
+                    await list.append();
+                    expect(list.writes).toEqual([]);
+                    expect(list.ref.current!.getState().scroll).toBe(0);
+                } finally {
+                    list.unmount();
+                }
+            });
+        }
+    }
 
     it("does not pull a flick back to the end when data arrives after finger release", async () => {
         const list = await mountFollowingList();

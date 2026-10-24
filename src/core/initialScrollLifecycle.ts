@@ -135,7 +135,7 @@ export function handleInitialScrollDataChange(
 
     if (didStartFreshData) {
         // The previous dataset's scroll must not block or finish the new bootstrap.
-        cancelImperativeScroll(state);
+        cancelImperativeScroll(state, "unreachable");
         set$(ctx, "isScrollActive", !!state.isDragging || !!state.isMomentumScrolling);
         state.endFollowInterrupted = false;
         state.didDeferMaintainScrollAtEndForMomentum = false;
@@ -179,7 +179,8 @@ export function handleInitialScrollDataChange(
             dataLength,
             didDataChange,
             initialScrollAtEnd,
-            previousDataLength: previousInitialScrollDataLength,
+            // A new dataset reuses the empty-to-non-empty bootstrap handoff.
+            previousDataLength: didStartFreshData ? 0 : previousInitialScrollDataLength,
             stylePaddingEnd,
         });
         return;

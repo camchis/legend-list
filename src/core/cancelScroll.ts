@@ -6,12 +6,13 @@ import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";
 import { getContentSize } from "@/state/getContentSize";
 import { peek$, type StateContext, set$ } from "@/state/state";
+import type { LegendListScrollResult } from "@/types.base";
 import { toNativeHorizontalOffset } from "@/utils/rtl";
 
 export function cancelScroll(
     ctx: StateContext,
     stopAnimation = true,
-    reason: "interrupted" | "superseded" = "superseded",
+    reason: Exclude<LegendListScrollResult, void>["reason"] = "superseded",
 ) {
     const { state } = ctx;
     const wasAnimating = !!state.scrollingTo?.animated;
@@ -53,6 +54,7 @@ export function interruptUserScroll(ctx: StateContext) {
         ctx.scrollRequestTracker?.cancel();
         interruptMaintainScrollAtEnd(ctx);
         cancelImperativeScroll(ctx.state, "interrupted");
+        clearPreservedInitialScrollTarget(ctx.state);
         ctx.state.pendingEndMeasurements = undefined;
         ctx.state.visibleContentAnchor = undefined;
         ctx.state.scrollElementTarget = undefined;

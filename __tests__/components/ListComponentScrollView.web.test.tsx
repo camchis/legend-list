@@ -109,6 +109,9 @@ function resetMocks() {
     ownerScroll = 0;
     maxOffset = 0;
     ownsInput = true;
+    mockCtx.state.props.horizontal = false;
+    mockCtx.state.props.rtl = false;
+    mockCtx.state.horizontalRTLScrollType = undefined;
     mockCtx.state.lastLayout = undefined;
     mockCtx.state.anchoredEndSpaceSize = undefined;
     mockCtx.state.dataChangeNeedsScrollUpdate = false;
@@ -129,6 +132,55 @@ describe("ListComponentScrollView (web)", () => {
     beforeEach(() => {
         registerWebScrollMocks();
     });
+
+    for (const mode of ["vertical", "negative", "inverted"] as const) {
+        it(`keeps intended end navigation owned in ${mode} coordinates`, async () => {
+            resetMocks();
+            maxOffset = 1000;
+            const horizontal = mode !== "vertical";
+            mockCtx.state.props.horizontal = horizontal;
+            mockCtx.state.props.rtl = horizontal;
+            mockCtx.state.horizontalRTLScrollType = horizontal ? mode : undefined;
+            mockCtx.state.scroll = 1000;
+            mockCtx.state.scrollingTo = { animated: true, isScrollToEnd: true, offset: 900 };
+            const interrupt = spyOn(cancellationModule, "interruptUserScroll").mockImplementation(() => {});
+            const { ListComponentScrollView } = await import(
+                "../../src/components/ListComponentScrollView?end-coordinates"
+            );
+            let renderer: TestRenderer.ReactTestRenderer | undefined;
+            try {
+                act(() => {
+                    renderer = TestRenderer.create(
+                        <ListComponentScrollView horizontal={horizontal} onScroll={() => {}} style={{}} />,
+                        {
+                            createNodeMock: () => ({
+                                addEventListener,
+                                removeEventListener,
+                                scrollLeft: mode === "negative" ? -950 : 50,
+                                scrollTo() {},
+                                scrollTop: 950,
+                            }),
+                        },
+                    );
+                });
+                scrollListeners.get("scroll")?.({} as Event);
+                expect(interrupt).not.toHaveBeenCalled();
+                // Once unowned, input away from the end must still interrupt automatic following.
+                mockCtx.state.scrollingTo = undefined;
+                mockCtx.state.maintainingScrollAtEnd = "pending-animated";
+                mockCtx.state.scroll = 950;
+                scrollListeners.get("scroll")?.({} as Event);
+                expect(interrupt).not.toHaveBeenCalled();
+                scrollListeners.get("wheel")?.({ deltaX: horizontal ? -40 : 0, deltaY: 40 } as WheelEvent);
+                expect(interrupt).not.toHaveBeenCalled();
+                scrollListeners.get("wheel")?.({ deltaX: horizontal ? 40 : 0, deltaY: -40 } as WheelEvent);
+                expect(interrupt).toHaveBeenCalledTimes(1);
+            } finally {
+                act(() => renderer?.unmount());
+                interrupt.mockRestore();
+            }
+        });
+    }
 
     it("keeps non-animated scrolling instant when the owner enables smooth CSS scrolling", async () => {
         resetMocks();

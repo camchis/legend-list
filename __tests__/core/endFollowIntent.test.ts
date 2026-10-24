@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
+import { calculateItemsInView } from "../../src/core/calculateItemsInView";
 import { interruptUserScroll } from "../../src/core/cancelScroll";
+import { checkFinishedScroll } from "../../src/core/checkFinishedScroll";
 import { checkResetContainers } from "../../src/core/checkResetContainers";
 import * as follow from "../../src/core/doMaintainScrollAtEnd";
+import * as platformScroll from "../../src/core/doScrollTo";
+import { doScrollTo as doNativeScrollTo } from "../../src/core/doScrollTo.native";
 import { finishInitialScroll } from "../../src/core/finishInitialScroll";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import { dispatchInitialScroll } from "../../src/core/initialScroll";
@@ -324,7 +328,7 @@ describe("measured DOM navigation", () => {
 
     it("releases a disconnected DOM target and ignores subpixel deltas", () => {
         const disconnected = setupElementTarget({ bottom: 320, height: 20, top: 300 }, false);
-        expect(scrollElementIntoView(disconnected.ctx)).toBe(false);
+        expect(scrollElementIntoView(disconnected.ctx)).toBe("unreachable");
         expect(disconnected.ctx.state.scrollElementTarget).toBeUndefined();
         expect(disconnected.scroll).not.toHaveBeenCalled();
         mock.restore();
@@ -332,6 +336,37 @@ describe("measured DOM navigation", () => {
         const aligned = setupElementTarget({ bottom: 200.5, height: 20, top: 180.5 });
         expect(scrollElementIntoView(aligned.ctx)).toBe(false);
         expect(aligned.scroll).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])("reveals a horizontally displaced element (rtl=%s)", (rtl) => {
+        const node = { getBoundingClientRect: () => ({ bottom: 200, left: 0, right: 200, top: 0 }) };
+        const element = {
+            getBoundingClientRect: () => ({
+                bottom: 20,
+                height: 20,
+                left: rtl ? -120 : 300,
+                right: rtl ? -100 : 320,
+                top: 0,
+                width: 20,
+            }),
+            isConnected: true,
+        };
+        const ctx = createMockContext(
+            {},
+            {
+                props: { horizontal: true, rtl },
+                refScroller: { current: { getScrollableNode: () => node } } as any,
+                scroll: 40,
+                scrollElementTarget: { element: element as any },
+            },
+        );
+        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation(() => {});
+        try {
+            expect(scrollElementIntoView(ctx)).toBe(true);
+            expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 160 });
+        } finally {
+            scroll.mockRestore();
+        }
     });
 
     it("scrolls a connected Range target into view", () => {
@@ -503,6 +538,34 @@ describe("scroll ownership boundaries", () => {
         expect(createImperativeHandle(ctx).getState().isFollowingEnd).toBe(false);
     });
 
+    it("reveals an element below the window viewport even within document bounds", () => {
+        const previousHeight = window.innerHeight;
+        window.innerHeight = 600;
+        const node = { getBoundingClientRect: () => ({ bottom: 3000, top: -400 }) };
+        const element = { getBoundingClientRect: () => ({ bottom: 820, height: 20, top: 800 }), isConnected: true };
+        const ctx = createMockContext(
+            {},
+            {
+                refScroller: {
+                    current: {
+                        getCurrentScrollOffset: () => 400,
+                        getScrollableNode: () => node,
+                        isWindowScroll: () => true,
+                    },
+                } as any,
+                scrollElementTarget: { element: element as any, viewportMargin: { bottom: 20 } },
+            },
+        );
+        const scroll = spyOn(scrollModule, "scrollTo").mockImplementation(() => {});
+        try {
+            expect(scrollElementIntoView(ctx)).toBe(true);
+            expect(scroll).toHaveBeenCalledWith(ctx, { animated: false, offset: 640 });
+        } finally {
+            window.innerHeight = previousHeight;
+            scroll.mockRestore();
+        }
+    });
+
     it("releases the measured DOM target when its owned request settles", async () => {
         const node = { getBoundingClientRect: () => ({ bottom: 200, top: 0 }) };
         const element = { getBoundingClientRect: () => ({ bottom: 320, height: 20, top: 300 }), isConnected: true };
@@ -545,6 +608,84 @@ describe("reading snapshots during dataset placement", () => {
 });
 
 describe("keyed navigation through layout changes", () => {
+    for (const { platform, mvcp } of (["ios", "android", "web"] as const).flatMap((os) =>
+        [false, true].map((enabled) => ({ mvcp: enabled, platform: os })),
+    )) {
+        it(`lands and resolves an active keyed prepend with MVCP ${mvcp} on ${platform}`, async () => {
+            Platform.OS = platform;
+            if (platform !== "web") spyOn(platformScroll, "doScrollTo").mockImplementation(doNativeScrollTo);
+            const frames = new Map<number, FrameRequestCallback>();
+            let nextFrame = 0;
+            globalThis.requestAnimationFrame = (callback) => {
+                frames.set(++nextFrame, callback);
+                return nextFrame;
+            };
+            globalThis.cancelAnimationFrame = (handle) => {
+                frames.delete(handle);
+            };
+            const flushFrames = () => {
+                for (let pass = 0; frames.size && pass < 20; pass++) {
+                    const pending = [...frames.values()];
+                    frames.clear();
+                    for (const callback of pending) callback(pass * 16);
+                }
+            };
+            let observed = 0;
+            const ctx = createMockContext(
+                { numColumns: 1, numContainers: 10, readyToRender: true },
+                {
+                    didContainersLayout: true,
+                    didFinishInitialScroll: true,
+                    props: {
+                        data: Array.from({ length: 100 }, (_, i) => `item-${i}`),
+                        getFixedItemSize: () => 100,
+                        keyExtractor: (item) => item,
+                        maintainVisibleContentPosition: mvcp ? { data: true, size: true } : false,
+                    },
+                    refScroller: {
+                        current: {
+                            getCurrentScrollOffset: () => observed,
+                            getScrollableNode: () => ({}),
+                            scrollTo: ({ y }: { y: number }) => {
+                                observed = y;
+                            },
+                        },
+                    } as any,
+                    scrollLength: 500,
+                },
+            );
+            try {
+                updateItemPositions(ctx, true);
+                const promise = createImperativeHandle(ctx).scrollToKey({
+                    animated: !mvcp && platform !== "web",
+                    key: "item-50",
+                    viewPosition: 0,
+                });
+                expect(observed).toBe(5000);
+                expect(ctx.state.scrollingTo?.key).toBe("item-50");
+                ctx.state.props.data = [
+                    ...Array.from({ length: 10 }, (_, i) => `prepend-${i}`),
+                    ...ctx.state.props.data,
+                ];
+                calculateItemsInView(ctx, { dataChanged: true, doMVCP: true });
+                if (mvcp || platform === "web") expect(ctx.state.scroll).toBe(6000);
+                // Native scroll events and momentum-end use the physical dispatched offset.
+                if (platform !== "web") {
+                    ctx.state.scrollPending = observed;
+                    updateScroll(ctx, observed, false);
+                    checkFinishedScroll(ctx);
+                }
+                flushFrames();
+                expect(observed).toBe(6000);
+                expect(await promise).toBeUndefined();
+                expect(ctx.state.scrollingTo).toBeUndefined();
+                expect(createImperativeHandle(ctx).getState().scroll).toBe(6000);
+            } finally {
+                ctx.state.scheduledWork.dispose();
+            }
+        });
+    }
+
     function setupQueuedKeyTarget() {
         Platform.OS = "web";
         const frames: FrameRequestCallback[] = [];
@@ -625,7 +766,7 @@ describe("keyed navigation through layout changes", () => {
                 stylePaddingEnd: 0,
                 useBootstrapInitialScroll: false,
             });
-            await promise;
+            expect(await promise).toEqual({ reason: "unreachable" });
             expect(ctx.state.pendingScrollResolve).toBeUndefined();
             expect(ctx.state.scheduledWork.has("imperativeScrollReady")).toBe(false);
             frames.shift()?.(0);

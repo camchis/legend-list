@@ -2,14 +2,14 @@ import { IsNewArchitecture } from "@/constants-platform";
 import { calculateOffsetForIndex } from "@/core/calculateOffsetForIndex";
 import { cancelScroll } from "@/core/cancelScroll";
 import { invalidateFixedItemSizes } from "@/core/containerItemMetadata";
-import { doMaintainScrollAtEnd, interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { armAppScrollRearm, doMaintainScrollAtEnd, interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import { getDistanceFromEnd, getObservedScrollOffset } from "@/core/emitMetrics";
 import { supersedeInitialScroll } from "@/core/finishInitialScroll";
 import { getStartOffsetAdjustment } from "@/core/getStartOffsetAdjustment";
 import { retargetActiveInitialScrollAtEnd } from "@/core/initialScrollLifecycle";
 import { scheduleContainerLayout } from "@/core/scheduleContainerLayout";
 import { scrollElementIntoView } from "@/core/scrollElementIntoView";
-import { getScrollRequestTracker } from "@/core/scrollRequestTracker";
+import { getScrollRequestTracker, type ScrollRequestRun } from "@/core/scrollRequestTracker";
 import { findPositionIndexAtOrBeforeOffset, scrollTo } from "@/core/scrollTo";
 import { scrollToEnd } from "@/core/scrollToEnd";
 import { scrollToIndex } from "@/core/scrollToIndex";
@@ -17,6 +17,7 @@ import { setContentInsetOverride } from "@/core/updateContentMetrics";
 import { updateItemSizes } from "@/core/updateItemSizes";
 import { updateScroll } from "@/core/updateScroll";
 import { updateViewableItems } from "@/core/viewability";
+import { Platform } from "@/platform/Platform";
 import { getContentInsetEnd } from "@/state/getContentInsetEnd";
 import { getContentSize } from "@/state/getContentSize";
 import {
@@ -124,16 +125,15 @@ export function createImperativeHandle(
         state.scheduledWork.frame(check, "imperativeScrollReady");
     };
 
-    const runScrollRequest = (token: number, resolve: ScrollResolve, run: () => boolean, isReady = () => true) => {
+    const runScrollRequest = (token: number, resolve: ScrollResolve, run: ScrollRequestRun, isReady = () => true) => {
         const runNow = () => scrollRequestTracker.runNow(token, resolve, run);
-
         if (isSettlingAfterDataChange() || !isReady()) {
             runWhenReady(token, runNow, isReady);
         } else {
             runNow();
         }
     };
-    const runScrollWithPromise = (run: () => boolean, isReady = () => true) =>
+    const runScrollWithPromise = (run: ScrollRequestRun, isReady = () => true) =>
         new Promise<LegendListScrollResult>((resolve) => {
             const token = scrollRequestTracker.start(resolve);
 
@@ -158,32 +158,85 @@ export function createImperativeHandle(
         }
     };
 
-    const scrollIndexIntoView = (options: Parameters<LegendListRef["scrollIndexIntoView"]>[0]) => {
-        if (state) {
-            const { index, viewportMargin, ...rest } = options;
-            if (index < 0 || index >= state.props.data.length) return false;
-            const observed = getObservedScrollOffset(ctx);
-            const position = calculateOffsetForIndex(ctx, index) + getStartOffsetAdjustment(ctx);
-            const size = (getItemSizeAtIndex(ctx, index) ?? 0) - ctx.scrollAxisGap;
-            const above = position < observed + (viewportMargin?.top ?? 0);
-            const below =
-                position + size >
-                observed + state.scrollLength - getContentInsetEnd(ctx) - (viewportMargin?.bottom ?? 0);
-            if (above || below) {
-                const viewPosition = above ? 0 : 1;
-                scrollToIndex(ctx, {
-                    ...rest,
-                    index,
-                    viewOffset: above ? (viewportMargin?.top ?? 0) : -(viewportMargin?.bottom ?? 0),
-                    viewPosition,
-                });
-                return true;
-            }
+    const scrollIndexIntoView = (
+        options: Parameters<LegendListRef["scrollIndexIntoView"]>[0],
+    ): boolean | "unreachable" => {
+        const { index, viewportMargin, ...rest } = options;
+        if (index < 0 || index >= state.props.data.length) return "unreachable";
+        const observed = getObservedScrollOffset(ctx);
+        const position = calculateOffsetForIndex(ctx, index) + getStartOffsetAdjustment(ctx);
+        const size = (getItemSizeAtIndex(ctx, index) ?? 0) - ctx.scrollAxisGap;
+        const above = position < observed + (viewportMargin?.top ?? 0);
+        const below =
+            position + size > observed + state.scrollLength - getContentInsetEnd(ctx) - (viewportMargin?.bottom ?? 0);
+        if (above || below) {
+            const viewPosition = above ? 0 : 1;
+            scrollToIndex(ctx, {
+                ...rest,
+                index,
+                viewOffset: above ? (viewportMargin?.top ?? 0) : -(viewportMargin?.bottom ?? 0),
+                viewPosition,
+            });
+            return true;
         }
         return false;
     };
 
     const refScroller = state.refScroller;
+    const appScrollRefs = new WeakMap<object, any>();
+    const getAppScrollRef = (ref: any): any => {
+        if (!ref || Platform.OS === "web") return ref;
+        let appRef = appScrollRefs.get(ref);
+        if (!appRef) {
+            const methods = new Map<
+                PropertyKey,
+                { original: (...args: any[]) => any; wrapped: (...args: any[]) => any }
+            >();
+            appRef = new Proxy(ref, {
+                get(target, key) {
+                    const value = Reflect.get(target, key, target);
+                    if (typeof value !== "function") return value;
+                    let method = methods.get(key);
+                    if (!method || method.original !== value) {
+                        const wrapped = (...args: any[]) => {
+                            if (
+                                key === "scrollTo" ||
+                                key === "scrollToEnd" ||
+                                key === "scrollToOffset" ||
+                                key === "scrollResponderScrollTo" ||
+                                key === "scrollResponderScrollNativeHandleToKeyboard" ||
+                                key === "scrollResponderZoomTo"
+                            ) {
+                                // Only app commands release ownership; internal dispatch keeps the raw ref.
+                                if (
+                                    state.scrollingTo ||
+                                    state.pendingScrollResolve ||
+                                    state.pendingScrollToEnd ||
+                                    state.initialScroll ||
+                                    state.visibleContentAnchor ||
+                                    state.scrollElementTarget ||
+                                    state.pendingEndMeasurements
+                                ) {
+                                    cancelScroll(ctx, false);
+                                }
+                                interruptMaintainScrollAtEnd(ctx);
+                                armAppScrollRearm(ctx);
+                            }
+                            const result = value.apply(target, args);
+                            return key === "getNativeScrollRef" || key === "getScrollResponder"
+                                ? getAppScrollRef(result)
+                                : result;
+                        };
+                        method = { original: value, wrapped };
+                        methods.set(key, method);
+                    }
+                    return method.wrapped;
+                },
+            });
+            appScrollRefs.set(ref, appRef);
+        }
+        return appRef;
+    };
     const clearCaches = (options?: Parameters<LegendListRef["clearCaches"]>[0]) => {
         const mode = options?.mode ?? "sizes";
 
@@ -243,8 +296,8 @@ export function createImperativeHandle(
         cancelScroll: () => cancelScroll(ctx),
         clearCaches,
         flashScrollIndicators: () => refScroller.current!.flashScrollIndicators(),
-        getAnimatableRef: () => refScroller.current!.getNativeScrollRef?.() ?? refScroller.current!,
-        getNativeScrollRef: () => refScroller.current!,
+        getAnimatableRef: () => getAppScrollRef(refScroller.current!.getNativeScrollRef?.() ?? refScroller.current!),
+        getNativeScrollRef: () => getAppScrollRef(refScroller.current!),
         getScrollAnchor: () => {
             if (
                 !state.didFinishInitialScroll ||
@@ -260,7 +313,7 @@ export function createImperativeHandle(
                 : { key, offset: observed - startAdjustment - calculateOffsetForIndex(ctx, index) };
         },
         getScrollableNode: () => refScroller.current!.getScrollableNode(),
-        getScrollResponder: () => refScroller.current!.getScrollResponder(),
+        getScrollResponder: () => getAppScrollRef(refScroller.current!.getScrollResponder()),
         getState: () => ({
             activeStickyIndex: peek$(ctx, "activeStickyIndex"),
             contentLength: getContentSize(ctx),
@@ -341,10 +394,12 @@ export function createImperativeHandle(
                 const data = state.props.data;
                 const index = data.indexOf(item);
                 if (index !== -1) {
-                    scrollIndexIntoView({ index, ...props });
-                    return true;
+                    const result = scrollIndexIntoView({ index, ...props });
+                    if (result === true && state.scrollingTo && state.props.keyExtractor)
+                        state.scrollingTo.key = getId(state, index);
+                    return result;
                 }
-                return false;
+                return "unreachable";
             }),
         scrollToEnd: (options) =>
             new Promise<LegendListScrollResult>((resolve) => {
@@ -366,6 +421,7 @@ export function createImperativeHandle(
         scrollToIndex: (params) => {
             return runScrollWithPromise(
                 () => {
+                    if (params.index < 0 || params.index >= state.props.data.length) return "unreachable";
                     scrollToIndex(ctx, params);
                     return true;
                 },
@@ -378,15 +434,16 @@ export function createImperativeHandle(
                 const index = data.indexOf(item);
                 if (index !== -1) {
                     scrollToIndex(ctx, { index, ...props });
+                    if (state.scrollingTo && state.props.keyExtractor) state.scrollingTo.key = getId(state, index);
                     return true;
                 }
-                return false;
+                return "unreachable";
             }),
         scrollToKey: ({ key, ...params }) =>
             runScrollWithPromise(
                 () => {
                     const index = state.indexByKey.get(key);
-                    if (index === undefined) return false;
+                    if (index === undefined) return "unreachable";
                     scrollToIndex(ctx, { ...params, index });
                     if (state.scrollingTo) state.scrollingTo.key = key;
                     return true;
@@ -398,7 +455,7 @@ export function createImperativeHandle(
             ),
         scrollToOffset: (params) =>
             runScrollWithPromise(() => {
-                scrollTo(ctx, params);
+                scrollTo(ctx, { ...params, clampToContentContainerMinSize: true });
                 return true;
             }),
         setItemSize: (itemKey, size) => {

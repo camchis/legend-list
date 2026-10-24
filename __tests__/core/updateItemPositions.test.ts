@@ -44,6 +44,17 @@ describe("updateItemPositions", () => {
         mockState = mockCtx.state;
     });
 
+    it("remaps an active keyed target while rebuilding data without MVCP", () => {
+        mockState.props.getFixedItemSize = () => 100;
+        updateItemPositions(mockCtx, true);
+        mockState.scrollingTo = { animated: true, index: 1, key: "item2", offset: 100 };
+        mockState.props.data = [{ id: "new" }, ...mockState.props.data];
+        resetLayoutCachesForDataChange(mockState);
+        updateItemPositions(mockCtx, true, { doMVCP: false, startIndex: 0 });
+        expect(mockState.scrollingTo.index).toBe(2);
+        expect(mockState.indexByKey.get("item2")).toBe(2);
+    });
+
     describe("reusing completed single-column positions", () => {
         beforeEach(() => {
             mockState.props.estimatedItemSize = 100;
