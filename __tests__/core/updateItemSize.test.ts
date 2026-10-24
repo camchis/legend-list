@@ -589,50 +589,53 @@ describe("item size update functions", () => {
             }
         });
 
-        it("recalculates positions with the published total while following the end under an anchor lock", () => {
-            const prevPlatform = Platform.OS;
-            Platform.OS = "web";
-            try {
-                const calculateSpy = spyOn(calculateItemsInViewModule, "calculateItemsInView").mockImplementation(
-                    () => undefined as any,
-                );
-                const maintainSpy = spyOn(doMaintainScrollAtEndModule, "doMaintainScrollAtEnd").mockImplementation(
-                    () => true,
-                );
-                const rafSpy = spyOn(globalThis, "requestAnimationFrame").mockImplementation((_cb: any) => 1);
+        it.each(["isFollowingEnd", "isWithinMaintainScrollAtEndThreshold"] as const)(
+            "recalculates positions with the published total under an anchor lock when %s drives the end follow",
+            (endFollowKey) => {
+                const prevPlatform = Platform.OS;
+                Platform.OS = "web";
                 try {
-                    mockState.props.maintainScrollAtEnd = {
-                        animated: false,
-                        onDataChange: true,
-                        onFooterLayout: true,
-                        onItemLayout: true,
-                        onLayout: true,
-                    };
-                    mockState.mvcpAnchorLock = {
-                        expiresAt: Date.now() + 1000,
-                        id: "item_0",
-                        position: 0,
-                        quietPasses: 0,
-                    };
-                    mockCtx.values.set("isFollowingEnd", true);
-                    mockState.sizesKnown.set("item_0", 100);
-                    mockState.sizes.set("item_0", 100);
+                    const calculateSpy = spyOn(calculateItemsInViewModule, "calculateItemsInView").mockImplementation(
+                        () => undefined as any,
+                    );
+                    const maintainSpy = spyOn(doMaintainScrollAtEndModule, "doMaintainScrollAtEnd").mockImplementation(
+                        () => true,
+                    );
+                    const rafSpy = spyOn(globalThis, "requestAnimationFrame").mockImplementation((_cb: any) => 1);
+                    try {
+                        mockState.props.maintainScrollAtEnd = {
+                            animated: false,
+                            onDataChange: true,
+                            onFooterLayout: true,
+                            onItemLayout: true,
+                            onLayout: true,
+                        };
+                        mockState.mvcpAnchorLock = {
+                            expiresAt: Date.now() + 1000,
+                            id: "item_0",
+                            position: 0,
+                            quietPasses: 0,
+                        };
+                        mockCtx.values.set(endFollowKey, true);
+                        mockState.sizesKnown.set("item_0", 100);
+                        mockState.sizes.set("item_0", 100);
 
-                    updateItemAndFlush(mockCtx, "item_0", { height: 60, width: 400 });
+                        updateItemAndFlush(mockCtx, "item_0", { height: 60, width: 400 });
 
-                    // The end follow scrolls to the new total, so positions must commit with it.
-                    expect(calculateSpy).toHaveBeenCalledTimes(1);
-                    expect(rafSpy).not.toHaveBeenCalled();
-                    expect(mockState.scheduledWork.has("mvcpRecalculate")).toBe(false);
+                        // The end follow scrolls to the new total, so positions must commit with it.
+                        expect(calculateSpy).toHaveBeenCalledTimes(1);
+                        expect(rafSpy).not.toHaveBeenCalled();
+                        expect(mockState.scheduledWork.has("mvcpRecalculate")).toBe(false);
+                    } finally {
+                        rafSpy.mockRestore();
+                        maintainSpy.mockRestore();
+                        calculateSpy.mockRestore();
+                    }
                 } finally {
-                    rafSpy.mockRestore();
-                    maintainSpy.mockRestore();
-                    calculateSpy.mockRestore();
+                    Platform.OS = prevPlatform;
                 }
-            } finally {
-                Platform.OS = prevPlatform;
-            }
-        });
+            },
+        );
 
         it("cancels queued mvcp recalculate and runs immediately when anchor lock clears", () => {
             const prevPlatform = Platform.OS;

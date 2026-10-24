@@ -104,7 +104,11 @@ function flushItemSizeUpdates(ctx: StateContext, result: ItemSizeUpdateResult) {
             schedulePreservedEndAnchorCorrection(ctx);
         }
         state.scrollForNextCalculateItemsInView = undefined;
-        runOrScheduleMVCPRecalculate(ctx, result.shouldMaintainScrollAtEnd && peek$(ctx, "isFollowingEnd"));
+        runOrScheduleMVCPRecalculate(
+            ctx,
+            result.shouldMaintainScrollAtEnd &&
+                (peek$(ctx, "isFollowingEnd") || peek$(ctx, "isWithinMaintainScrollAtEndThreshold")),
+        );
     } else if (result.didMeasureUserScrollAnchorResetItem && state.userScrollAnchorReset?.keys.size === 0) {
         state.userScrollAnchorReset = undefined;
     }
