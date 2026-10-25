@@ -710,7 +710,7 @@ export type LegendListRef = {
      * @param params.itemOffset - Region start measured from the item's start along the scroll axis. Default: 0 when itemLength is provided.
      * @param params.itemLength - Region length along the scroll axis. Default: 0 when itemOffset is provided. Omit both to reveal the whole item.
      * @param params.viewportMargin - Space to keep clear at the start and end of the viewport along the scroll axis.
-     * A visible region does not scroll; otherwise its nearest edge aligns inside the margins. A region larger than the available space aligns its start.
+     * The region should be within the item. A visible region does not scroll; otherwise its nearest edge aligns inside the margins. A region larger than the available space aligns its start.
      */
     scrollIndexIntoView(params: {
         animated?: boolean | undefined;
@@ -728,7 +728,7 @@ export type LegendListRef = {
      * @param params.itemOffset - Region start measured from the item's start along the scroll axis. Default: 0 when itemLength is provided.
      * @param params.itemLength - Region length along the scroll axis. Default: 0 when itemOffset is provided. Omit both to reveal the whole item.
      * @param params.viewportMargin - Space to keep clear at the start and end of the viewport along the scroll axis.
-     * A visible region does not scroll; otherwise its nearest edge aligns inside the margins. A region larger than the available space aligns its start.
+     * The region should be within the item. A visible region does not scroll; otherwise its nearest edge aligns inside the margins. A region larger than the available space aligns its start.
      */
     scrollItemIntoView(params: {
         animated?: boolean | undefined;

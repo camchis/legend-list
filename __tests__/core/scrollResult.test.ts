@@ -501,6 +501,26 @@ describe("imperative scroll results", () => {
 
     for (const method of ["scrollIndexIntoView", "scrollItemIntoView"] as const) {
         for (const animated of [false, true]) {
+            it(`resolves ${method} at the content end when its region margin exceeds the max offset (animated: ${animated})`, async () => {
+                const h = harness!;
+                const index = h.state.props.data.length - 1;
+                const options = { animated, itemLength: 20, itemOffset: 80, viewportMargin: { end: 20 } };
+                const result = trackScroll(
+                    method === "scrollIndexIntoView"
+                        ? h.ref.scrollIndexIntoView({ ...options, index })
+                        : h.ref.scrollItemIntoView({ ...options, item: h.state.props.data[index] }),
+                );
+                await flushMicrotasks();
+                expect(result.resolved).toBe(false);
+                h.browser.runToEnd();
+                h.clock.advance(100);
+                await flushMicrotasks();
+                expect(h.browser.offset).toBe(9500);
+                expect(h.state.scroll).toBe(9500);
+                expect(result.resolved).toBe(true);
+                expect(result.value).toBeUndefined();
+            });
+
             it(`resolves ${method} for an inner region after landing (animated: ${animated})`, async () => {
                 const h = harness!;
                 h.measure({ 2: 1000 });
