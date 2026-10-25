@@ -518,6 +518,23 @@ describe("LegendList layout fuzz", () => {
         },
     );
 
+    it.each(["ios", "android", "web"] as const)(
+        "keeps the tail covered after removing then appending back (%s, seed 99)",
+        async (platform) => {
+            const { config, sizeSeed } = generate(99);
+            const { failure } = await runScenario(
+                99,
+                { ...config, platform },
+                [
+                    { at: 0.744, n: 2, t: "remove" },
+                    { n: 2, t: "append" },
+                ],
+                sizeSeed,
+            );
+            expect(failure).toBeUndefined();
+        },
+    );
+
     it(`keeps layout invariants across ${getSeeds().length} seeded scenarios`, async () => {
         const failures: string[] = [];
         const known = new Map<KnownIssue, number[]>();

@@ -360,6 +360,8 @@ export function schedulePreservedEndAnchorCorrection(ctx: StateContext) {
                 horizontal: state.props.horizontal,
                 offset: resolveInitialScrollOffset(ctx, state.initialScroll!),
             });
+            // The correction moves before its scroll event; render the destination in the same frame.
+            state.triggerCalculateItemsInView?.();
         }
 
         requestAnimationFrame(tick);

@@ -6,6 +6,7 @@ import {
     handleBootstrapInitialScrollLayoutChange,
     schedulePreservedEndAnchorCorrection,
 } from "../../src/core/bootstrapInitialScroll";
+import { calculateItemsInView } from "../../src/core/calculateItemsInView";
 import { calculateOffsetWithOffsetPosition } from "../../src/core/calculateOffsetWithOffsetPosition";
 import { doMaintainScrollAtEnd } from "../../src/core/doMaintainScrollAtEnd";
 import { clearPreservedInitialScrollTarget } from "../../src/core/finishInitialScroll";
@@ -216,6 +217,41 @@ describe.each(["web", "ios", "android"] as const)("end anchoring across a late v
         flushFrame();
         expect(scrollTo).not.toHaveBeenCalled();
         expect(ctx.state.scroll).toBe(400);
+    });
+
+    it("covers the destination in the frame a preserved target becomes valid again", async () => {
+        const { ctx, observed, setObserved, scrollTo } = setup(0);
+        const { state, values } = ctx;
+        state.props.maintainScrollAtEnd = undefined;
+        state.props.maintainVisibleContentPosition = { data: false, size: false };
+        state.props.drawDistance = 0;
+        values.set("numColumns", 1);
+        values.set("numContainers", 8);
+        values.set("numContainersPooled", 8);
+        state.triggerCalculateItemsInView = () => calculateItemsInView(ctx);
+        const data = state.props.data;
+
+        state.props.data = data.slice(0, -2);
+        values.set("totalSize", 600);
+        state.scroll = state.lastNativeScroll = 200;
+        setObserved(200);
+        calculateItemsInView(ctx);
+        expect(schedulePreservedEndAnchorCorrection(ctx)).toBe(false);
+        expect(checkLayoutInvariants(ctx, { blankOnly: true, scrollOffset: observed() })).toEqual([]);
+
+        state.props.data = data;
+        values.set("totalSize", 800);
+        calculateItemsInView(ctx);
+        expect(state.endBuffered).toBeLessThan(7);
+        schedulePreservedEndAnchorCorrection(ctx);
+        await Promise.resolve();
+        flushFrame();
+        await Promise.resolve();
+
+        expect(scrollTo).toHaveBeenCalled();
+        expect(observed()).toBe(400);
+        expect(state.scroll).toBe(400);
+        expect(checkLayoutInvariants(ctx, { blankOnly: true, scrollOffset: observed() })).toEqual([]);
     });
 
     for (const queued of [false, true]) {
