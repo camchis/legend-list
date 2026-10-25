@@ -228,9 +228,17 @@ export function checkDomCoverage(ctx: ListCtx, tolerance = DEFAULT_TOLERANCE): L
     if (!parent || parent.style.opacity === "0") return [];
     const scroller = findScroller(parent);
     const content = parent.getBoundingClientRect();
-    const view = scroller
-        ? scroller.getBoundingClientRect()
-        : ({ bottom: innerHeight, left: 0, right: innerWidth, top: 0 } as DOMRect);
+    // The scroller's client box: its borders and scrollbars are not viewport.
+    const outer = scroller?.getBoundingClientRect();
+    const view =
+        scroller && outer
+            ? {
+                  bottom: outer.top + scroller.clientTop + scroller.clientHeight,
+                  left: outer.left + scroller.clientLeft,
+                  right: outer.left + scroller.clientLeft + scroller.clientWidth,
+                  top: outer.top + scroller.clientTop,
+              }
+            : { bottom: innerHeight, left: 0, right: innerWidth, top: 0 };
     const [viewStart, viewEnd] = horizontal
         ? [Math.max(view.left, 0), Math.min(view.right, innerWidth)]
         : [Math.max(view.top, 0), Math.min(view.bottom, innerHeight)];
