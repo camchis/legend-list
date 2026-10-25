@@ -13,6 +13,7 @@ import { Platform } from "../../src/platform/Platform";
 import { peek$, type StateContext, set$ } from "../../src/state/state";
 import type { InternalState, LegendListInternalRef } from "../../src/types.internal";
 import { setDidLayout } from "../../src/utils/setDidLayout";
+import { skipLayoutInvariants } from "../helpers/layoutInvariantHarness";
 import { act, render } from "../helpers/testingLibrary";
 import { installFakeClock } from "../helpers/webScrollHarness";
 
@@ -964,6 +965,8 @@ describe("LegendList bootstrap initial scroll", () => {
     });
 
     it("keeps the web layer painted but noninteractive during a fresh dataKey layout reset", async () => {
+        // Marks layout complete with setDidLayout and never allocates rows.
+        skipLayoutInvariants();
         const previousPlatform = Platform.OS;
         Platform.OS = "web";
         WebContainers = (await import("../../src/components/Containers?fresh-data-web-containers")).Containers;

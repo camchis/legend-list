@@ -1,0 +1,344 @@
+// Dev/test-only layout invariants for LegendList. The list exposes its internal context to
+// globalThis.__LEGEND_LIST_DEV_HOOK__ in dev builds (see src/components/useDevChecks.ts); nothing
+// here ships in the library. Shared by the unit-test harness, the fuzzer and the example apps.
+
+const POSITION_OUT_OF_VIEW = -10000000;
+
+// Structural view of the internal StateContext, so this file does not depend on src types.
+export type ListCtx = {
+    scrollAxisGap: number;
+    state: any;
+    values: Map<string, any>;
+    viewRefs: Map<number, { current: any }>;
+};
+
+export type LayoutViolation =
+    | { kind: "firstPosition"; position: number }
+    | { kind: "position"; index: number; expected: number; actual: number }
+    | { kind: "totalSize"; expected: number; actual: number }
+    | { kind: "containerPosition"; containerId: number; index: number; expected: number; actual: number }
+    | { kind: "blank"; source: "state" | "dom"; start: number; end: number; size: number; viewport: [number, number] };
+
+type Interval = [number, number];
+
+const DEFAULT_TOLERANCE = 1;
+
+function sizeOf(state: any, key: string | undefined) {
+    return key === undefined ? undefined : (state.sizesKnown.get(key) ?? state.sizes.get(key));
+}
+
+function startOffset(ctx: ListCtx) {
+    const { state, values } = ctx;
+    const padding = state.props.horizontal ? state.props.stylePaddingLeft || 0 : values.get("stylePaddingTop") || 0;
+    return padding + (values.get("alignItemsAtEndPadding") || 0) + (values.get("headerSize") || 0);
+}
+
+function isCheckable(ctx: ListCtx) {
+    const { state, values } = ctx;
+    return (
+        !state.isUnmounted &&
+        !!values.get("readyToRender") &&
+        state.scrollLength > 0 &&
+        state.props.data.length > 0 &&
+        state.idCache.length >= state.props.data.length
+    );
+}
+
+/** Uncovered spans of `region`, given covering intervals (merged in place). */
+function findGaps(intervals: Interval[], region: Interval, tolerance: number): Interval[] {
+    intervals.sort((a, b) => a[0] - b[0]);
+    const gaps: Interval[] = [];
+    let cursor = region[0];
+    for (const [start, end] of intervals) {
+        if (start - cursor > tolerance && cursor < region[1]) {
+            gaps.push([cursor, Math.min(start, region[1])]);
+        }
+        cursor = Math.max(cursor, end);
+        if (cursor >= region[1]) break;
+    }
+    if (region[1] - cursor > tolerance) {
+        gaps.push([cursor, region[1]]);
+    }
+    return gaps.filter(([start, end]) => end - start > tolerance);
+}
+
+/** The visible item-space window the list itself renders for (calculateItemsInView's math). */
+export function getVisibleItemRange(ctx: ListCtx): Interval {
+    const { state, values } = ctx;
+    const totalSize = state.totalSize;
+    let scroll = Math.round(state.scroll + (values.get("scrollAdjustPending") ?? 0) - startOffset(ctx));
+    if (!state.props.hasExternalScroll && scroll + state.scrollLength > totalSize) {
+        scroll = Math.max(0, totalSize - state.scrollLength);
+    }
+    return [Math.max(0, scroll), Math.min(scroll + state.scrollLength, totalSize)];
+}
+
+/** Rendered containers as [index, itemSpaceStart, size, containerId]. */
+export function getRenderedContainers(ctx: ListCtx) {
+    const { state, values } = ctx;
+    const rendered: Array<[number, number, number, number]> = [];
+    // Containers are placed at their item position minus the pending scroll adjustment.
+    const pending = values.get("scrollAdjustPending") ?? 0;
+    const numContainers = values.get("numContainers") ?? 0;
+    for (let id = 0; id < numContainers; id++) {
+        const key = values.get(`containerItemKey${id}`);
+        const position = values.get(`containerPosition${id}`);
+        const index = key === undefined ? undefined : state.indexByKey.get(key);
+        const size = sizeOf(state, key);
+        if (index === undefined || size === undefined || position === undefined || position === POSITION_OUT_OF_VIEW) {
+            continue;
+        }
+        if (state.props.hideItemsUntilMeasured && values.get(`containerLayoutReady${id}`) === false) {
+            continue;
+        }
+        rendered.push([index, position + pending, size, id]);
+    }
+    return rendered;
+}
+
+/** One-line summary of the state the invariants read, for failure messages. */
+export function describeListState(ctx: ListCtx) {
+    const { state } = ctx;
+    const rendered = getRenderedContainers(ctx)
+        .sort((a, b) => a[0] - b[0])
+        .map(([index, position, size]) => `${index}@${position}+${size}`);
+    const target = state.scrollingTo;
+    return [
+        `scroll ${state.scroll}`,
+        `scrollLength ${state.scrollLength}`,
+        `totalSize ${state.totalSize}`,
+        `data ${state.props.data.length}`,
+        `buffered ${state.startBuffered}-${state.endBuffered}`,
+        `initialScroll ${state.initialScrollSession?.kind ?? "none"}`,
+        `scrollingTo ${target ? `${target.index ?? ""}@${target.offset}${target.animated ? " animated" : ""}` : "none"}`,
+        `rendered ${rendered.join(" ")}`,
+    ].join(", ");
+}
+
+export interface CheckLayoutOptions {
+    /** Also require each rendered container to sit at its item's computed position. */
+    containerPositions?: boolean;
+    tolerance?: number;
+}
+
+/**
+ * Checks the list's own layout state: positions are contiguous from 0 through the rendered items,
+ * totalSize is the sum of item sizes, and the visible window is covered by rendered containers.
+ */
+export function checkLayoutInvariants(ctx: ListCtx, options: CheckLayoutOptions = {}): LayoutViolation[] {
+    if (!isCheckable(ctx)) return [];
+    const { state, values } = ctx;
+    const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+    const violations: LayoutViolation[] = [];
+    const { idCache, positions } = state;
+    const dataLength = state.props.data.length;
+    const numColumns = values.get("numColumns") ?? 1;
+    const rendered = getRenderedContainers(ctx);
+
+    if (numColumns === 1) {
+        // Positions past the rendered items may lag by design (early-break position passes).
+        let lastRenderedIndex = -1;
+        for (const [index] of rendered) lastRenderedIndex = Math.max(lastRenderedIndex, index);
+        if (positions[0] !== undefined && Math.abs(positions[0]) > tolerance) {
+            violations.push({ kind: "firstPosition", position: positions[0] });
+        }
+        let sum = 0;
+        let sumKnown = true;
+        for (let i = 0; i < dataLength; i++) {
+            const size = sizeOf(state, idCache[i]);
+            if (i <= lastRenderedIndex && i > 0 && sumKnown) {
+                const actual = positions[i];
+                if (actual !== undefined && Math.abs(actual - sum) > tolerance) {
+                    violations.push({ actual, expected: sum, index: i, kind: "position" });
+                    break;
+                }
+            }
+            if (size === undefined) {
+                sumKnown = false;
+            } else {
+                sum += size;
+            }
+        }
+        const totalSize = state.pendingTotalSize ?? state.totalSize;
+        if (sumKnown && Math.abs(totalSize - sum) > tolerance) {
+            violations.push({ actual: totalSize, expected: sum, kind: "totalSize" });
+        }
+    }
+
+    // Horizontal RTL containers use mirrored physical positions; only the position checks apply.
+    if (state.props.horizontal && state.props.rtl) return violations;
+
+    if (options.containerPositions) {
+        for (const [index, position, , containerId] of rendered) {
+            const expected = positions[index];
+            const isSticky = values.get(`containerSticky${containerId}`);
+            if (!isSticky && expected !== undefined && Math.abs(expected - position) > tolerance) {
+                violations.push({ actual: position, containerId, expected, index, kind: "containerPosition" });
+            }
+        }
+    }
+
+    const viewport = getVisibleItemRange(ctx);
+    if (viewport[1] - viewport[0] > tolerance) {
+        const intervals = rendered.map(([, position, size]): Interval => [position, position + size]);
+        for (const [start, end] of findGaps(intervals, viewport, tolerance + (ctx.scrollAxisGap || 0))) {
+            violations.push({ end, kind: "blank", size: end - start, source: "state", start, viewport });
+        }
+    }
+
+    return violations;
+}
+
+function findScroller(element: HTMLElement): HTMLElement | null {
+    for (let node = element.parentElement; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (/(auto|scroll)/.test(style.overflowY + style.overflowX)) return node;
+    }
+    return null;
+}
+
+/**
+ * Web only: checks the painted DOM. The part of the containers' parent that is inside the scroller's
+ * visible rect must be covered by the bounding rects of rendered container elements.
+ */
+export function checkDomCoverage(ctx: ListCtx, tolerance = DEFAULT_TOLERANCE): LayoutViolation[] {
+    if (typeof document === "undefined" || !isCheckable(ctx)) return [];
+    const { state, values } = ctx;
+    const horizontal = !!state.props.horizontal;
+    const intervals: Interval[] = [];
+    let parent: HTMLElement | null = null;
+    const numContainers = values.get("numContainers") ?? 0;
+    for (let id = 0; id < numContainers; id++) {
+        const element = ctx.viewRefs.get(id)?.current as HTMLElement | null | undefined;
+        const key = values.get(`containerItemKey${id}`);
+        if (!element?.getBoundingClientRect || key === undefined || !state.indexByKey.has(key)) continue;
+        parent ??= element.parentElement;
+        if (element.style.opacity === "0") continue;
+        const rect = element.getBoundingClientRect();
+        intervals.push(horizontal ? [rect.left, rect.right] : [rect.top, rect.bottom]);
+    }
+    if (!parent || parent.style.opacity === "0") return [];
+    const scroller = findScroller(parent);
+    const content = parent.getBoundingClientRect();
+    const view = scroller
+        ? scroller.getBoundingClientRect()
+        : ({ bottom: innerHeight, left: 0, right: innerWidth, top: 0 } as DOMRect);
+    const region: Interval = horizontal
+        ? [Math.max(content.left, view.left, 0), Math.min(content.right, view.right, innerWidth)]
+        : [Math.max(content.top, view.top, 0), Math.min(content.bottom, view.bottom, innerHeight)];
+    if (region[1] - region[0] <= tolerance) return [];
+    const origin = horizontal ? content.left : content.top;
+    return findGaps(intervals, region, tolerance + (ctx.scrollAxisGap || 0)).map(([start, end]) => ({
+        end: end - origin,
+        kind: "blank" as const,
+        size: end - start,
+        source: "dom" as const,
+        start: start - origin,
+        viewport: [region[0] - origin, region[1] - origin] as [number, number],
+    }));
+}
+
+type DevHook = (ctx: ListCtx) => (() => void) | undefined;
+type DevGlobal = typeof globalThis & { __LEGEND_LIST_DEV_HOOK__?: DevHook };
+
+/** Registers a callback for every LegendList that mounts in a dev build; returns an uninstaller. */
+export function installListRegistry(lists: Set<ListCtx>) {
+    const g = globalThis as DevGlobal;
+    const previous = g.__LEGEND_LIST_DEV_HOOK__;
+    g.__LEGEND_LIST_DEV_HOOK__ = (ctx) => {
+        lists.add(ctx);
+        const previousCleanup = previous?.(ctx);
+        return () => {
+            lists.delete(ctx);
+            previousCleanup?.();
+        };
+    };
+    return () => {
+        g.__LEGEND_LIST_DEV_HOOK__ = previous;
+    };
+}
+
+export interface FrameViolation {
+    frame: number;
+    list: number;
+    scroll: number;
+    time: number;
+    totalSize: number;
+    violations: LayoutViolation[];
+}
+
+export interface LayoutMonitor {
+    frames: number;
+    log: FrameViolation[];
+    reset(): void;
+    stop(): void;
+    summary(): { blankFrames: number; frames: number; maxBlank: number; violationFrames: number };
+}
+
+/**
+ * Samples every mounted list once per painted frame and records frames that break an invariant.
+ * Sampling runs in a task posted from requestAnimationFrame, i.e. after the frame's rAF and
+ * ResizeObserver work, so it sees the state the frame painted.
+ */
+export function startLayoutMonitor({
+    label = "LLGAP",
+    onViolation,
+}: {
+    label?: string;
+    onViolation?: (entry: FrameViolation) => void;
+} = {}): LayoutMonitor {
+    const lists = new Set<ListCtx>();
+    const ids = new WeakMap<ListCtx, number>();
+    let nextId = 0;
+    const uninstall = installListRegistry(lists);
+    const monitor: LayoutMonitor = {
+        frames: 0,
+        log: [],
+        reset() {
+            monitor.frames = 0;
+            monitor.log.length = 0;
+        },
+        stop() {
+            stopped = true;
+            uninstall();
+        },
+        summary() {
+            let maxBlank = 0;
+            let blankFrames = 0;
+            for (const entry of monitor.log) {
+                const blanks = entry.violations.filter((v) => v.kind === "blank");
+                if (blanks.length) blankFrames++;
+                for (const v of blanks) maxBlank = Math.max(maxBlank, v.size);
+            }
+            return { blankFrames, frames: monitor.frames, maxBlank, violationFrames: monitor.log.length };
+        },
+    };
+    let stopped = false;
+    const channel = typeof MessageChannel !== "undefined" ? new MessageChannel() : undefined;
+    const sample = () => {
+        if (stopped) return;
+        monitor.frames++;
+        for (const ctx of lists) {
+            if (!ids.has(ctx)) ids.set(ctx, nextId++);
+            const violations = [...checkLayoutInvariants(ctx), ...checkDomCoverage(ctx)];
+            if (violations.length) {
+                const entry: FrameViolation = {
+                    frame: monitor.frames,
+                    list: ids.get(ctx)!,
+                    scroll: ctx.state.scroll,
+                    time: Math.round(typeof performance !== "undefined" ? performance.now() : Date.now()),
+                    totalSize: ctx.state.totalSize,
+                    violations,
+                };
+                if (monitor.log.length < 5000) monitor.log.push(entry);
+                if (onViolation) onViolation(entry);
+                else console.log(`[${label}] ${JSON.stringify(entry)}`);
+            }
+        }
+        requestAnimationFrame(afterFrame);
+    };
+    if (channel) channel.port1.onmessage = sample;
+    const afterFrame = () => (channel ? channel.port2.postMessage(0) : setTimeout(sample, 0));
+    requestAnimationFrame(afterFrame);
+    return monitor;
+}

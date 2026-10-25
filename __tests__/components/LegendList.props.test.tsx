@@ -24,6 +24,7 @@ import { peek$, type StateContext, set$, useArr$ } from "../../src/state/state";
 import { getKnownOrFixedItemSize } from "../../src/utils/getItemSize";
 import { clearWarnDevOnceForTests } from "../../src/utils/helpers";
 import { setDidLayout } from "../../src/utils/setDidLayout";
+import { skipLayoutInvariants } from "../helpers/layoutInvariantHarness";
 
 const handlerInstances: ScrollAdjustHandler[] = [];
 const layoutEvent = {
@@ -1988,6 +1989,8 @@ describe("LegendList props behavior", () => {
     });
 
     it("warns on web when the outer height is effectively unbounded and virtualization is disabled", async () => {
+        // Fakes viewport and container counts without laying out rows.
+        skipLayoutInvariants();
         const consoleWarnSpy = mock(() => {});
         const originalWarn = console.warn;
         console.warn = consoleWarnSpy as any;
@@ -2034,6 +2037,8 @@ describe("LegendList props behavior", () => {
     });
 
     it("does not warn on web when container allocation stays bounded", async () => {
+        // Fakes viewport and container counts without laying out rows.
+        skipLayoutInvariants();
         const consoleWarnSpy = mock(() => {});
         const originalWarn = console.warn;
         console.warn = consoleWarnSpy as any;
