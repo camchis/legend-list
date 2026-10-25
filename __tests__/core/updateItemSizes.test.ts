@@ -4,7 +4,7 @@ import "../setup"; // Import global test setup
 import { Platform } from "@/platform/Platform";
 import * as calculateItemsInViewModule from "../../src/core/calculateItemsInView";
 import { invalidateFixedItemSizes } from "../../src/core/containerItemMetadata";
-import { interruptMaintainScrollAtEnd } from "../../src/core/doMaintainScrollAtEnd";
+import { interruptMaintainScrollAtEnd } from "../../src/core/finishMaintainScrollAtEnd";
 import { scrollToEnd } from "../../src/core/scrollToEnd";
 import {
     batchItemSizeUpdates,

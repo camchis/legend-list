@@ -4,7 +4,6 @@ import { cancelScroll } from "@/core/cancelScroll";
 import { checkFinishedScrollFallback, getCurrentTargetOffset } from "@/core/checkFinishedScroll";
 import { type DoScrollToParams, getNativeScrollPoint } from "@/core/doScrollParams";
 import { finishScrollTo } from "@/core/finishScrollTo";
-import { scrollTo } from "@/core/scrollTo";
 import type { StateContext } from "@/state/state";
 import type { LegendListScrollerRef } from "@/types.internal";
 import { clampScrollIndex } from "@/utils/clampScrollIndex";
@@ -118,7 +117,7 @@ function retryLanding(
     const { averageSizeSnapshot: _averageSizeSnapshot, ...target } = scrollingTo;
     const index = target.index === undefined ? undefined : clampScrollIndex(target.index, ctx.state.props.data.length);
 
-    scrollTo(ctx, {
+    ctx.scrollTo!({
         ...target,
         animated:
             !!scrollingTo.animated &&

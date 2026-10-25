@@ -29,9 +29,11 @@ import { checkStructuralDataChange } from "@/core/checkStructuralDataChange";
 import { invalidateFixedItemSizes } from "@/core/containerItemMetadata";
 import { resetContainerLayoutReady } from "@/core/containerLayoutReady";
 import { doInitialAllocateContainers } from "@/core/doInitialAllocateContainers";
-import { doMaintainScrollAtEnd, finishMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { doScrollTo } from "@/core/doScrollTo";
 import { getEndAlignedViewOffset } from "@/core/endOfContentTarget";
 import { clearPreservedInitialScrollTarget } from "@/core/finishInitialScroll";
+import { finishMaintainScrollAtEnd } from "@/core/finishMaintainScrollAtEnd";
 import { handleLayout } from "@/core/handleLayout";
 import { advanceCurrentInitialScrollSession, resolveInitialScrollOffset } from "@/core/initialScroll";
 import { handleInitialScrollDataChange, initializeInitialScrollOnMount } from "@/core/initialScrollLifecycle";
@@ -39,6 +41,7 @@ import { onScroll } from "@/core/onScroll";
 import { resetLayoutCachesForDataChange } from "@/core/resetLayoutCachesForDataChange";
 import { ScheduledWork } from "@/core/ScheduledWork";
 import { ScrollAdjustHandler } from "@/core/ScrollAdjustHandler";
+import { scrollTo } from "@/core/scrollTo";
 import { scrollToEnd } from "@/core/scrollToEnd";
 import { maybeUpdateAnchoredEndSpace } from "@/core/updateAnchoredEndSpace";
 import { updateContentInsetEndAdjustment } from "@/core/updateContentInsetEndAdjustment";
@@ -447,7 +450,11 @@ const LegendListInner = typedForwardRef(function LegendListInner<T>(
             };
 
             const internalState = ctx.state;
-            // Late-bind this command so updateScroll can maintain the end without importing back through scrollTo.
+            // Late-bind these commands so lower-level scroll modules can call back up without import cycles.
+            ctx.doMaintainScrollAtEnd = () => doMaintainScrollAtEnd(ctx);
+            ctx.doScrollTo = (params) => doScrollTo(ctx, params);
+            ctx.interruptUserScroll = () => interruptUserScroll(ctx);
+            ctx.scrollTo = (params) => scrollTo(ctx, params);
             ctx.scrollToEnd = (options) => scrollToEnd(ctx, options);
             internalState.triggerCalculateItemsInView = (params) => calculateItemsInView(ctx, params);
             internalState.reprocessCurrentScroll = () => updateScroll(ctx, internalState.scroll, true);

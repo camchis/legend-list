@@ -1,4 +1,4 @@
-import { rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
+import { rearmEndFollowIfSettled } from "@/core/finishMaintainScrollAtEnd";
 import type { StateContext } from "@/state/state";
 import { checkAtBottom } from "@/utils/checkAtBottom";
 import { checkAtTop } from "@/utils/checkAtTop";

@@ -14,7 +14,7 @@ import {
 } from "react";
 
 import { interruptUserScroll } from "@/core/cancelScroll";
-import { rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
+import { rearmEndFollowIfSettled } from "@/core/finishMaintainScrollAtEnd";
 import type { LayoutRectangle, NativeSyntheticEvent } from "@/platform/platform-types";
 import { StyleSheet } from "@/platform/StyleSheet";
 import { useArr$, useStateContext } from "@/state/state";

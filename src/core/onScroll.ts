@@ -2,7 +2,7 @@ import { clearFinishedBootstrapInitialScrollTargetIfMovedAway } from "@/core/boo
 import { interruptUserScroll } from "@/core/cancelScroll";
 import { checkFinishedScroll } from "@/core/checkFinishedScroll";
 import { clampScrollOffset } from "@/core/clampScrollOffset";
-import { armAppScrollRearm } from "@/core/doMaintainScrollAtEnd";
+import { armAppScrollRearm } from "@/core/finishMaintainScrollAtEnd";
 import { initialScrollWatchdog } from "@/core/initialScrollSession";
 import { scrollTo } from "@/core/scrollTo";
 import { updateScroll } from "@/core/updateScroll";

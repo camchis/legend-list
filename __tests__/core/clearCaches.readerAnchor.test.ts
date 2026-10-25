@@ -3,7 +3,7 @@ import "../setup";
 
 import { calculateItemsInView } from "../../src/core/calculateItemsInView";
 import { interruptUserScroll } from "../../src/core/cancelScroll";
-import { rearmEndFollowIfSettled } from "../../src/core/doMaintainScrollAtEnd";
+import { rearmEndFollowIfSettled } from "../../src/core/finishMaintainScrollAtEnd";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import { prepareMVCP } from "../../src/core/mvcp";
 import { updateItemPositions } from "../../src/core/updateItemPositions";

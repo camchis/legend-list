@@ -1,7 +1,6 @@
 import { EDGE_POSITION_EPSILON } from "@/constants";
 import { updateAdaptiveRender } from "@/core/adaptiveRender";
-import { interruptUserScroll } from "@/core/cancelScroll";
-import { doMaintainScrollAtEnd, interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { interruptMaintainScrollAtEnd } from "@/core/finishMaintainScrollAtEnd";
 import { resolvePendingNativeMVCPAdjust } from "@/core/mvcp";
 import { flushSync } from "@/platform/flushSync";
 import { Platform } from "@/platform/Platform";
@@ -108,7 +107,7 @@ export function updateScroll(
                   ));
     if (didCancelMaintainScrollAtEnd) {
         if (Platform.OS === "web") {
-            interruptUserScroll(ctx);
+            ctx.interruptUserScroll!();
         } else {
             // Native-ref and custom scroller commands have no list owner.
             interruptMaintainScrollAtEnd(ctx);
@@ -187,7 +186,7 @@ export function updateScroll(
         // after that pending native adjust resolves so the list still ends up pinned to the tail.
         if (didResolvePendingNativeMVCPAdjust && shouldMaintainScrollAtEndAfterPendingSettle) {
             state.pendingMaintainScrollAtEnd = false;
-            doMaintainScrollAtEnd(ctx);
+            ctx.doMaintainScrollAtEnd!();
         }
 
         state.dataChangeNeedsScrollUpdate = false;

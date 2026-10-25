@@ -1,7 +1,7 @@
 import { cancelImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
-import { interruptMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
 import { getNativeScrollPoint } from "@/core/doScrollParams";
 import { clearPreservedInitialScrollTarget, supersedeInitialScroll } from "@/core/finishInitialScroll";
+import { interruptMaintainScrollAtEnd } from "@/core/finishMaintainScrollAtEnd";
 import { getObservedScrollOffset } from "@/core/observedScroll";
 import { updateScroll } from "@/core/updateScroll";
 import { Platform } from "@/platform/Platform";

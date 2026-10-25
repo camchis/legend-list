@@ -1,7 +1,7 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
 import "../setup";
 
-import { rearmEndFollowIfSettled } from "../../src/core/doMaintainScrollAtEnd";
+import { rearmEndFollowIfSettled } from "../../src/core/finishMaintainScrollAtEnd";
 import { armUserScrollSettle, settleUserScroll } from "../../src/core/userMomentum";
 import { createMockContext } from "../__mocks__/createMockContext";
 import { installFakeClock } from "../helpers/webScrollHarness";

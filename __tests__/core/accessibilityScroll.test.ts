@@ -3,11 +3,8 @@ import "../setup";
 
 import { Platform } from "@/platform/Platform";
 import { checkResetContainers } from "../../src/core/checkResetContainers";
-import {
-    doMaintainScrollAtEnd,
-    finishMaintainScrollAtEnd,
-    interruptMaintainScrollAtEnd,
-} from "../../src/core/doMaintainScrollAtEnd";
+import { doMaintainScrollAtEnd } from "../../src/core/doMaintainScrollAtEnd";
+import { finishMaintainScrollAtEnd, interruptMaintainScrollAtEnd } from "../../src/core/finishMaintainScrollAtEnd";
 import { onScroll } from "../../src/core/onScroll";
 import { updateItemSizes } from "../../src/core/updateItemSizes";
 import * as screenReader from "../../src/platform/screenReader";

@@ -1,6 +1,7 @@
 import { EDGE_POSITION_EPSILON, USER_MOMENTUM_STALL_TIMEOUT_MS, USER_MOMENTUM_WAIT_TIMEOUT_MS } from "@/constants";
 import { syncScrollActive } from "@/core/cancelImperativeScroll";
-import { doMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
+import { doMaintainScrollAtEnd } from "@/core/doMaintainScrollAtEnd";
+import { rearmEndFollowIfSettled } from "@/core/finishMaintainScrollAtEnd";
 import { getContentSize } from "@/state/getContentSize";
 import { peek$, type StateContext, set$ } from "@/state/state";
 

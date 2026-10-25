@@ -44,28 +44,10 @@ function getRuntimeImports(file: string, platformExt: string) {
     return imports;
 }
 
-// Pre-existing cycles among the scroll orchestration modules. Shrink this list as they are broken;
-// any module newly joining a cycle fails the test.
-const KNOWN_CYCLE_FILES = [
-    "core/cancelScroll.ts",
-    "core/checkFinishedScroll.ts",
-    "core/doMaintainScrollAtEnd.ts",
-    "core/finishInitialScroll.ts",
-    "core/finishScrollTo.ts",
-    "core/mvcp.ts",
-    "core/recalculateSettledScroll.ts",
-    "core/scrollRequestTracker.ts",
-    "core/updateScroll.ts",
-    "utils/checkThresholds.ts",
-    "utils/requestAdjust.ts",
-];
-const KNOWN_PLATFORM_CYCLE_FILES: Record<string, string[]> = {
-    ".native": ["core/doScrollTo.native.ts"],
-    ".web": ["core/doScrollTo.ts", "core/scrollTo.ts"],
-};
-
 function findFilesInCycles(platformExt: string) {
-    const files = listFiles(SRC).filter((f) => !/\.(native|web)\.tsx?$/.test(f) || f.includes(`${platformExt}.`));
+    const files = listFiles(SRC).filter(
+        (f) => !/\.(native|web)\.tsx?$/.test(f) || (!!platformExt && f.includes(`${platformExt}.`)),
+    );
     const graph = new Map(files.map((f) => [f, getRuntimeImports(f, platformExt)]));
     const reachesItself = (file: string) => {
         const seen = new Set<string>();
@@ -88,10 +70,9 @@ function findFilesInCycles(platformExt: string) {
 }
 
 describe("import cycles", () => {
-    for (const platformExt of [".native", ".web"]) {
-        it(`has no new runtime import cycles under src for ${platformExt}`, () => {
-            const expected = [...KNOWN_CYCLE_FILES, ...KNOWN_PLATFORM_CYCLE_FILES[platformExt]].sort();
-            expect(findFilesInCycles(platformExt)).toEqual(expected);
+    for (const platformExt of [".native", ".web", ""]) {
+        it(`has no runtime import cycles under src for ${platformExt || "base"}`, () => {
+            expect(findFilesInCycles(platformExt)).toEqual([]);
         });
     }
 });

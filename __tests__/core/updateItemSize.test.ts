@@ -4,6 +4,7 @@ import "../setup"; // Import global test setup
 import { Platform } from "@/platform/Platform";
 import * as calculateItemsInViewModule from "../../src/core/calculateItemsInView";
 import * as doMaintainScrollAtEndModule from "../../src/core/doMaintainScrollAtEnd";
+import { interruptMaintainScrollAtEnd } from "../../src/core/finishMaintainScrollAtEnd";
 import { getScrollRequestTracker } from "../../src/core/scrollRequestTracker";
 import { updateItemSizes, updateOneItemSize } from "../../src/core/updateItemSizes";
 import type { StateContext } from "../../src/state/state";
@@ -337,7 +338,7 @@ describe("item size update functions", () => {
                     Platform.OS = platform;
                     mockState.isWithinMaintainScrollAtEndThreshold = true;
                     mockState.isDragging = true;
-                    doMaintainScrollAtEndModule.interruptMaintainScrollAtEnd(mockCtx);
+                    interruptMaintainScrollAtEnd(mockCtx);
 
                     updateItemAndFlush(mockCtx, "item_0", { height: 150, width: 400 });
 
@@ -363,7 +364,7 @@ describe("item size update functions", () => {
                     Platform.OS = platform;
                     mockState.isWithinMaintainScrollAtEndThreshold = true;
                     mockState.isDragging = true;
-                    doMaintainScrollAtEndModule.interruptMaintainScrollAtEnd(mockCtx);
+                    interruptMaintainScrollAtEnd(mockCtx);
                     mockState.scroll = 380;
                     mockState.isDragging = false;
 
@@ -390,7 +391,7 @@ describe("item size update functions", () => {
                     expect(mockState.maintainingScrollAtEnd).toBe(isWeb ? "instant" : "pending-instant");
                     expect(runTrackedScrollToEnd).toHaveBeenCalledTimes(isWeb ? 1 : 0);
 
-                    doMaintainScrollAtEndModule.interruptMaintainScrollAtEnd(mockCtx);
+                    interruptMaintainScrollAtEnd(mockCtx);
                     mockState.scroll = 100;
                     mockState.isWithinMaintainScrollAtEndThreshold = false;
                     updateItemAndFlush(mockCtx, "item_0", { height: 180, width: 400 });

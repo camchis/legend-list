@@ -104,7 +104,7 @@ type BootstrapInitialScrollSession = {
     visibleIndices?: readonly number[];
 };
 
-type InternalScrollTarget = ScrollTarget & {
+export type InternalScrollTarget = ScrollTarget & {
     isScrollToEnd?: boolean;
     /** Web retries reissued after an animated scroll settled short of its recomputed target. */
     landingRetries?: number;

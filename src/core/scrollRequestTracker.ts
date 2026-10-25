@@ -1,6 +1,6 @@
 import { settlePendingImperativeScroll, syncScrollActive } from "@/core/cancelImperativeScroll";
 import { cancelScroll, stopScrollAnimation } from "@/core/cancelScroll";
-import { interruptMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/doMaintainScrollAtEnd";
+import { interruptMaintainScrollAtEnd, rearmEndFollowIfSettled } from "@/core/finishMaintainScrollAtEnd";
 import { type StateContext, set$ } from "@/state/state";
 import type { ScrollResolve } from "@/types.internal";
 

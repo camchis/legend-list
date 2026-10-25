@@ -9,6 +9,11 @@ import * as follow from "../../src/core/doMaintainScrollAtEnd";
 import * as platformScroll from "../../src/core/doScrollTo";
 import { doScrollTo as doNativeScrollTo } from "../../src/core/doScrollTo.native";
 import { finishInitialScroll } from "../../src/core/finishInitialScroll";
+import {
+    finishMaintainScrollAtEnd,
+    interruptMaintainScrollAtEnd,
+    rearmEndFollowIfSettled,
+} from "../../src/core/finishMaintainScrollAtEnd";
 import { finishScrollTo } from "../../src/core/finishScrollTo";
 import { dispatchInitialScroll } from "../../src/core/initialScroll";
 import { handleInitialScrollDataChange } from "../../src/core/initialScrollLifecycle";
@@ -109,7 +114,7 @@ describe("end follow intent", () => {
         handle.reportContentInset({ bottom: 0 });
         expect(maintain).toHaveBeenCalledTimes(2);
         ctx.state.scroll = 400;
-        follow.interruptMaintainScrollAtEnd(ctx);
+        interruptMaintainScrollAtEnd(ctx);
         handle.reportContentInset({ bottom: 200 });
         expect(handle.getState().isFollowingEnd).toBe(false);
     });
@@ -309,7 +314,7 @@ describe("canonical scroll geometry", () => {
         expect(ctx.state.pendingEndMeasurements).toEqual(new Set(["b", "c"]));
         ctx.state.containerItemKeys.set("b", 0);
         ctx.state.containerItemKeys.set("c", 1);
-        follow.finishMaintainScrollAtEnd(ctx);
+        finishMaintainScrollAtEnd(ctx);
         updateItemSizes(ctx, { itemKey: "b", size: { height: 4000, width: 200 } });
         expect(ctx.state.pendingEndMeasurements).toEqual(new Set(["c"]));
         expect(ctx.state.maintainingScrollAtEnd).toBe("pending-instant");
@@ -691,7 +696,7 @@ describe("end maintenance request ownership", () => {
                 expect(ctx.state.endFollowInterrupted).not.toBe(true);
 
                 if (interruption === "reader") {
-                    follow.interruptMaintainScrollAtEnd(ctx);
+                    interruptMaintainScrollAtEnd(ctx);
                 } else if (interruption === "dataset") {
                     ctx.state.freshDataTransitionEpoch++;
                     ctx.state.props.data = ["new"];
@@ -969,7 +974,7 @@ describe("end follow rearm after settling", () => {
                 updateScroll(ctx, offset, true, { fromNativeScrollEvent: true });
                 expect(follow.doMaintainScrollAtEnd(ctx)).toBe(false);
                 ctx.state.isDragging = false;
-                follow.rearmEndFollowIfSettled(ctx);
+                rearmEndFollowIfSettled(ctx);
                 expect(follow.doMaintainScrollAtEnd(ctx)).toBe(follows);
             });
         }
@@ -981,7 +986,7 @@ describe("end follow rearm after settling", () => {
             if (!maintainScrollAtEnd) ctx.state.props.maintainScrollAtEnd = false;
             ctx.state.refScroller = { current: { getScrollableNode: () => null, scrollTo: () => {} } } as any;
             ctx.state.scroll = 400;
-            follow.interruptMaintainScrollAtEnd(ctx);
+            interruptMaintainScrollAtEnd(ctx);
             void createImperativeHandle(ctx).scrollToEnd({ animated: false });
             expect(ctx.state.scrollingTo?.isScrollToEnd).toBe(true);
             expect(ctx.state.endFollowInterrupted).toBe(false);
