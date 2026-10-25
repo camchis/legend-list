@@ -17,7 +17,8 @@ export type LayoutViolation =
     | { kind: "position"; index: number; expected: number; actual: number }
     | { kind: "totalSize"; expected: number; actual: number }
     | { kind: "containerPosition"; containerId: number; index: number; expected: number; actual: number }
-    | { kind: "blank"; source: "state" | "dom"; start: number; end: number; size: number; viewport: [number, number] };
+    | { kind: "blank"; source: "state" | "dom"; start: number; end: number; size: number; viewport: [number, number] }
+    | { kind: "overflow"; index: number; start: number; end: number; size: number };
 
 type Interval = [number, number];
 
@@ -199,23 +200,25 @@ function findScroller(element: HTMLElement): HTMLElement | null {
 
 /**
  * Web only: checks the painted DOM. The part of the containers' parent that is inside the scroller's
- * visible rect must be covered by the bounding rects of rendered container elements.
+ * visible rect must be covered by the bounding rects of rendered container elements, and no visible
+ * row may paint outside that parent (rows displaced past the content end, e.g. over a footer).
  */
 export function checkDomCoverage(ctx: ListCtx, tolerance = DEFAULT_TOLERANCE): LayoutViolation[] {
     if (typeof document === "undefined" || !isCheckable(ctx)) return [];
     const { state, values } = ctx;
     const horizontal = !!state.props.horizontal;
-    const intervals: Interval[] = [];
+    const rows: Array<[number, number, number]> = [];
     let parent: HTMLElement | null = null;
     const numContainers = values.get("numContainers") ?? 0;
     for (let id = 0; id < numContainers; id++) {
         const element = ctx.viewRefs.get(id)?.current as HTMLElement | null | undefined;
         const key = values.get(`containerItemKey${id}`);
-        if (!element?.getBoundingClientRect || key === undefined || !state.indexByKey.has(key)) continue;
+        const index = key === undefined ? undefined : state.indexByKey.get(key);
+        if (!element?.getBoundingClientRect || index === undefined) continue;
         parent ??= element.parentElement;
-        if (element.style.opacity === "0") continue;
+        if (element.style.opacity === "0" || values.get(`containerSticky${id}`)) continue;
         const rect = element.getBoundingClientRect();
-        intervals.push(horizontal ? [rect.left, rect.right] : [rect.top, rect.bottom]);
+        rows.push(horizontal ? [index, rect.left, rect.right] : [index, rect.top, rect.bottom]);
     }
     if (!parent || parent.style.opacity === "0") return [];
     const scroller = findScroller(parent);
@@ -223,19 +226,33 @@ export function checkDomCoverage(ctx: ListCtx, tolerance = DEFAULT_TOLERANCE): L
     const view = scroller
         ? scroller.getBoundingClientRect()
         : ({ bottom: innerHeight, left: 0, right: innerWidth, top: 0 } as DOMRect);
-    const region: Interval = horizontal
-        ? [Math.max(content.left, view.left, 0), Math.min(content.right, view.right, innerWidth)]
-        : [Math.max(content.top, view.top, 0), Math.min(content.bottom, view.bottom, innerHeight)];
-    if (region[1] - region[0] <= tolerance) return [];
-    const origin = horizontal ? content.left : content.top;
-    return findGaps(intervals, region, tolerance + (ctx.scrollAxisGap || 0)).map(([start, end]) => ({
-        end: end - origin,
-        kind: "blank" as const,
-        size: end - start,
-        source: "dom" as const,
-        start: start - origin,
-        viewport: [region[0] - origin, region[1] - origin] as [number, number],
-    }));
+    const [viewStart, viewEnd] = horizontal
+        ? [Math.max(view.left, 0), Math.min(view.right, innerWidth)]
+        : [Math.max(view.top, 0), Math.min(view.bottom, innerHeight)];
+    const [contentStart, contentEnd] = horizontal ? [content.left, content.right] : [content.top, content.bottom];
+    const region: Interval = [Math.max(contentStart, viewStart), Math.min(contentEnd, viewEnd)];
+    const violations: LayoutViolation[] = [];
+    for (const [index, start, end] of rows) {
+        const before = Math.min(end, contentStart, viewEnd) - Math.max(start, viewStart);
+        const after = Math.min(end, viewEnd) - Math.max(start, contentEnd, viewStart);
+        const size = Math.max(before, after);
+        if (size > tolerance) {
+            violations.push({ end: end - contentStart, index, kind: "overflow", size, start: start - contentStart });
+        }
+    }
+    if (region[1] - region[0] <= tolerance) return violations;
+    const intervals = rows.map(([, start, end]): Interval => [start, end]);
+    for (const [start, end] of findGaps(intervals, region, tolerance + (ctx.scrollAxisGap || 0))) {
+        violations.push({
+            end: end - contentStart,
+            kind: "blank",
+            size: end - start,
+            source: "dom",
+            start: start - contentStart,
+            viewport: [region[0] - contentStart, region[1] - contentStart],
+        });
+    }
+    return violations;
 }
 
 type DevHook = (ctx: ListCtx) => (() => void) | undefined;
@@ -261,6 +278,8 @@ export function installListRegistry(lists: Set<ListCtx>) {
 export interface FrameViolation {
     frame: number;
     list: number;
+    /** "frame": the state a frame painted. "task": the state after a DOM-mutating task (strict mode). */
+    phase: "frame" | "task";
     scroll: number;
     time: number;
     totalSize: number;
@@ -272,20 +291,27 @@ export interface LayoutMonitor {
     log: FrameViolation[];
     reset(): void;
     stop(): void;
-    summary(): { blankFrames: number; frames: number; maxBlank: number; violationFrames: number };
+    /** Frame counts and largest size per violation kind ("blank" counts state and DOM sources). */
+    summary(): { frames: number; violationFrames: number; kinds: Record<string, { frames: number; max: number }> };
 }
 
 /**
- * Samples every mounted list once per painted frame and records frames that break an invariant.
- * Sampling runs in a task posted from requestAnimationFrame, i.e. after the frame's rAF and
- * ResizeObserver work, so it sees the state the frame painted.
+ * Samples every mounted list once per frame and records frames that break an invariant.
+ * On web the sample runs in a ResizeObserver created during the frame's rAF, so it is delivered
+ * after the list's own rAF and ResizeObserver work, right before paint: it sees what the frame
+ * paints. A task posted after paint would also see intermediate states from tasks (timers, React
+ * scheduler) that run before the next frame corrects them. Native samples after the JS frame.
+ * `strict` (web) also checks after every DOM-mutating task outside the frame: states a frame
+ * would paint if it landed there, which slower devices can paint.
  */
 export function startLayoutMonitor({
     label = "LLGAP",
     onViolation,
+    strict = false,
 }: {
     label?: string;
     onViolation?: (entry: FrameViolation) => void;
+    strict?: boolean;
 } = {}): LayoutMonitor {
     const lists = new Set<ListCtx>();
     const ids = new WeakMap<ListCtx, number>();
@@ -300,24 +326,36 @@ export function startLayoutMonitor({
         },
         stop() {
             stopped = true;
+            sentinel?.remove();
+            mutations?.disconnect();
             uninstall();
         },
         summary() {
-            let maxBlank = 0;
-            let blankFrames = 0;
+            const kinds: Record<string, { frames: number; max: number }> = {};
             for (const entry of monitor.log) {
-                const blanks = entry.violations.filter((v) => v.kind === "blank");
-                if (blanks.length) blankFrames++;
-                for (const v of blanks) maxBlank = Math.max(maxBlank, v.size);
+                const seen = new Set<string>();
+                for (const v of entry.violations) {
+                    const kind = `${entry.phase === "task" ? "task:" : ""}${v.kind === "blank" ? `blank:${v.source}` : v.kind}`;
+                    kinds[kind] ??= { frames: 0, max: 0 };
+                    const stat = kinds[kind];
+                    if (!seen.has(kind)) stat.frames++;
+                    seen.add(kind);
+                    const size = "size" in v ? v.size : "expected" in v ? Math.abs(v.actual - v.expected) : 0;
+                    stat.max = Math.max(stat.max, size);
+                }
             }
-            return { blankFrames, frames: monitor.frames, maxBlank, violationFrames: monitor.log.length };
+            return { frames: monitor.frames, kinds, violationFrames: monitor.log.length };
         },
     };
     let stopped = false;
-    const channel = typeof MessageChannel !== "undefined" ? new MessageChannel() : undefined;
-    const sample = () => {
-        if (stopped) return;
-        monitor.frames++;
+    const sentinel =
+        typeof document !== "undefined" && typeof ResizeObserver !== "undefined"
+            ? document.createElement("div")
+            : undefined;
+    if (sentinel) {
+        sentinel.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none";
+    }
+    const check = (phase: FrameViolation["phase"]) => {
         for (const ctx of lists) {
             if (!ids.has(ctx)) ids.set(ctx, nextId++);
             const violations = [...checkLayoutInvariants(ctx), ...checkDomCoverage(ctx)];
@@ -325,6 +363,7 @@ export function startLayoutMonitor({
                 const entry: FrameViolation = {
                     frame: monitor.frames,
                     list: ids.get(ctx)!,
+                    phase,
                     scroll: ctx.state.scroll,
                     time: Math.round(typeof performance !== "undefined" ? performance.now() : Date.now()),
                     totalSize: ctx.state.totalSize,
@@ -335,10 +374,36 @@ export function startLayoutMonitor({
                 else console.log(`[${label}] ${JSON.stringify(entry)}`);
             }
         }
-        requestAnimationFrame(afterFrame);
     };
-    if (channel) channel.port1.onmessage = sample;
-    const afterFrame = () => (channel ? channel.port2.postMessage(0) : setTimeout(sample, 0));
-    requestAnimationFrame(afterFrame);
+    let inFrame = false;
+    const sample = () => {
+        if (stopped) return;
+        inFrame = false;
+        monitor.frames++;
+        check("frame");
+        requestAnimationFrame(onFrame);
+    };
+    const mutations =
+        strict && sentinel && typeof MutationObserver !== "undefined"
+            ? new MutationObserver(() => {
+                  if (!inFrame && !stopped) check("task");
+              })
+            : undefined;
+    // A new observer's first notification comes after every older observer's in this frame.
+    const onFrame = () => {
+        if (!sentinel) return setTimeout(sample, 0);
+        // Appended on the first frame: the monitor may start before the document has a root.
+        if (!sentinel.isConnected) {
+            document.documentElement.appendChild(sentinel);
+            mutations?.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
+        }
+        inFrame = true;
+        const observer = new ResizeObserver(() => {
+            observer.disconnect();
+            sample();
+        });
+        observer.observe(sentinel);
+    };
+    requestAnimationFrame(onFrame);
     return monitor;
 }
