@@ -2,6 +2,8 @@
 // globalThis.__LEGEND_LIST_DEV_HOOK__ in dev builds (see src/components/useDevChecks.ts); nothing
 // here ships in the library. Shared by the unit-test harness, the fuzzer and the example apps.
 
+import { getContentSize } from "@/state/getContentSize";
+
 const POSITION_OUT_OF_VIEW = -10000000;
 
 // Structural view of the internal StateContext, so this file does not depend on src types.
@@ -63,15 +65,13 @@ function findGaps(intervals: Interval[], region: Interval, tolerance: number): I
     return gaps.filter(([start, end]) => end - start > tolerance);
 }
 
-/** The visible item-space window the list itself renders for (calculateItemsInView's math). */
-export function getVisibleItemRange(ctx: ListCtx): Interval {
+/** The visible item-space window: the scroll offset clamped to the scrollable extent, as a scroll view does. */
+export function getVisibleItemRange(ctx: ListCtx, scrollOffset: number = ctx.state.scroll): Interval {
     const { state, values } = ctx;
-    const totalSize = state.totalSize;
-    let scroll = Math.round(state.scroll + (values.get("scrollAdjustPending") ?? 0) - startOffset(ctx));
-    if (!state.props.hasExternalScroll && scroll + state.scrollLength > totalSize) {
-        scroll = Math.max(0, totalSize - state.scrollLength);
-    }
-    return [Math.max(0, scroll), Math.min(scroll + state.scrollLength, totalSize)];
+    const maxOffset = Math.max(0, getContentSize(ctx as any) - state.scrollLength);
+    const offset = state.props.hasExternalScroll ? scrollOffset : Math.min(scrollOffset, maxOffset);
+    const start = offset + (values.get("scrollAdjustPending") ?? 0) - startOffset(ctx);
+    return [Math.max(0, start), Math.min(start + state.scrollLength, state.totalSize)];
 }
 
 /** Rendered containers as [index, itemSpaceStart, size, containerId]. */
@@ -110,15 +110,19 @@ export function describeListState(ctx: ListCtx) {
         `totalSize ${state.totalSize}`,
         `data ${state.props.data.length}`,
         `buffered ${state.startBuffered}-${state.endBuffered}`,
-        `initialScroll ${state.initialScrollSession?.kind ?? "none"}`,
+        `bootstrap ${state.initialScrollSession?.bootstrap ? "active" : "none"}`,
         `scrollingTo ${target ? `${target.index ?? ""}@${target.offset}${target.animated ? " animated" : ""}` : "none"}`,
         `rendered ${rendered.join(" ")}`,
     ].join(", ");
 }
 
 export interface CheckLayoutOptions {
+    /** Only check visible coverage, for frames where positions may lag by one pass. */
+    blankOnly?: boolean;
     /** Also require each rendered container to sit at its item's computed position. */
     containerPositions?: boolean;
+    /** The scroll view's actual offset, when known (defaults to the list's last observed scroll). */
+    scrollOffset?: number;
     tolerance?: number;
 }
 
@@ -136,7 +140,7 @@ export function checkLayoutInvariants(ctx: ListCtx, options: CheckLayoutOptions 
     const numColumns = values.get("numColumns") ?? 1;
     const rendered = getRenderedContainers(ctx);
 
-    if (numColumns === 1) {
+    if (numColumns === 1 && !options.blankOnly) {
         // Positions past the rendered items may lag by design (early-break position passes).
         let lastRenderedIndex = -1;
         for (const [index] of rendered) lastRenderedIndex = Math.max(lastRenderedIndex, index);
@@ -145,13 +149,14 @@ export function checkLayoutInvariants(ctx: ListCtx, options: CheckLayoutOptions 
         }
         let sum = 0;
         let sumKnown = true;
+        let reportedPosition = false;
         for (let i = 0; i < dataLength; i++) {
             const size = sizeOf(state, idCache[i]);
-            if (i <= lastRenderedIndex && i > 0 && sumKnown) {
+            if (i <= lastRenderedIndex && i > 0 && sumKnown && !reportedPosition) {
                 const actual = positions[i];
                 if (actual !== undefined && Math.abs(actual - sum) > tolerance) {
                     violations.push({ actual, expected: sum, index: i, kind: "position" });
-                    break;
+                    reportedPosition = true;
                 }
             }
             if (size === undefined) {
@@ -169,7 +174,7 @@ export function checkLayoutInvariants(ctx: ListCtx, options: CheckLayoutOptions 
     // Horizontal RTL containers use mirrored physical positions; only the position checks apply.
     if (state.props.horizontal && state.props.rtl) return violations;
 
-    if (options.containerPositions) {
+    if (options.containerPositions && !options.blankOnly) {
         for (const [index, position, , containerId] of rendered) {
             const expected = positions[index];
             const isSticky = values.get(`containerSticky${containerId}`);
@@ -179,7 +184,7 @@ export function checkLayoutInvariants(ctx: ListCtx, options: CheckLayoutOptions 
         }
     }
 
-    const viewport = getVisibleItemRange(ctx);
+    const viewport = getVisibleItemRange(ctx, options.scrollOffset);
     if (viewport[1] - viewport[0] > tolerance) {
         const intervals = rendered.map(([, position, size]): Interval => [position, position + size]);
         for (const [start, end] of findGaps(intervals, viewport, tolerance + (ctx.scrollAxisGap || 0))) {

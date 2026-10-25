@@ -1,9 +1,9 @@
-import {
-    checkLayoutInvariants,
-    describeListState,
-    installListRegistry,
-    type ListCtx,
-} from "../../examples-shared/layoutInvariants";
+import type { ListCtx } from "../../examples-shared/layoutInvariants";
+
+// Loaded lazily: the checker imports src modules, which must not load before setup registers
+// the native module mocks.
+const invariants = () =>
+    require("../../examples-shared/layoutInvariants") as typeof import("../../examples-shared/layoutInvariants");
 
 // Every LegendList mounted by a test registers here (dev hook in useDevChecks). The act()
 // wrappers in testRenderer/testingLibrary check the layout invariants after each act.
@@ -11,7 +11,7 @@ const liveLists = new Set<ListCtx>();
 let enabled = true;
 
 export function installLayoutInvariantHarness() {
-    installListRegistry(liveLists);
+    invariants().installListRegistry(liveLists);
 }
 
 /** Forget lists from the previous test (renderers a test did not unmount stay mounted). */
@@ -27,6 +27,7 @@ export function skipLayoutInvariants() {
 
 export function assertLayoutInvariants(lists: Iterable<ListCtx> = liveLists) {
     for (const ctx of lists) {
+        const { checkLayoutInvariants, describeListState } = invariants();
         const violations = checkLayoutInvariants(ctx, { containerPositions: true });
         if (violations.length) {
             throw new Error(
