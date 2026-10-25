@@ -170,15 +170,16 @@ export function createImperativeHandle(
     const scrollIndexIntoView = (
         options: Parameters<LegendListRef["scrollIndexIntoView"]>[0],
     ): boolean | "unreachable" => {
-        const { index, viewportMargin, ...rest } = options;
+        const { index, itemOffset, itemLength, viewportMargin, ...rest } = options;
         if (index < 0 || index >= state.props.data.length) return "unreachable";
+        const hasRegion = itemOffset !== undefined || itemLength !== undefined;
         const observed = getObservedScrollOffset(ctx);
-        const position = calculateOffsetForIndex(ctx, index) + getStartOffsetAdjustment(ctx);
-        const size = (getItemSizeAtIndex(ctx, index) ?? 0) - ctx.scrollAxisGap;
+        const position = calculateOffsetForIndex(ctx, index) + getStartOffsetAdjustment(ctx) + (itemOffset ?? 0);
+        const size = hasRegion ? (itemLength ?? 0) : (getItemSizeAtIndex(ctx, index) ?? 0) - ctx.scrollAxisGap;
         const viewportLength = state.scrollLength - getContentInsetEnd(ctx);
         const viewportStart = observed + (viewportMargin?.start ?? 0);
         const viewportEnd = observed + viewportLength - (viewportMargin?.end ?? 0);
-        if (position <= viewportStart && position + size >= viewportEnd) return false;
+        if (!hasRegion && position <= viewportStart && position + size >= viewportEnd) return false;
         const above = position < viewportStart;
         const below = position + size > viewportEnd;
         if (above || below) {
@@ -186,8 +187,13 @@ export function createImperativeHandle(
             scrollToIndex(ctx, {
                 ...rest,
                 index,
-                viewOffset: alignStart ? (viewportMargin?.start ?? 0) : -(viewportMargin?.end ?? 0),
-                viewPosition: alignStart ? 0 : 1,
+                viewOffset: hasRegion
+                    ? (alignStart ? (viewportMargin?.start ?? 0) : viewportLength - (viewportMargin?.end ?? 0) - size) -
+                      (itemOffset ?? 0)
+                    : alignStart
+                      ? (viewportMargin?.start ?? 0)
+                      : -(viewportMargin?.end ?? 0),
+                viewPosition: hasRegion || alignStart ? 0 : 1,
                 viewPositionFallback: "start",
             });
             return true;

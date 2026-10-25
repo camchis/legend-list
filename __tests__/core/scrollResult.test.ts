@@ -499,6 +499,35 @@ describe("imperative scroll results", () => {
         });
     }
 
+    for (const method of ["scrollIndexIntoView", "scrollItemIntoView"] as const) {
+        for (const animated of [false, true]) {
+            it(`resolves ${method} for an inner region after landing (animated: ${animated})`, async () => {
+                const h = harness!;
+                h.measure({ 2: 1000 });
+                const options = { animated, itemLength: 50, itemOffset: 700, viewportMargin: { end: 20, start: 10 } };
+                const result = trackScroll(
+                    method === "scrollIndexIntoView"
+                        ? h.ref.scrollIndexIntoView({ ...options, index: 2 })
+                        : h.ref.scrollItemIntoView({ ...options, item: h.state.props.data[2] }),
+                );
+                await flushMicrotasks();
+                expect(result.resolved).toBe(false);
+                h.browser.runToEnd();
+                h.clock.advance(100);
+                await flushMicrotasks();
+                expect(h.browser.offset).toBe(470);
+                expect(result.resolved).toBe(true);
+                expect(result.value).toBeUndefined();
+
+                const calls = h.scrollToCalls.length;
+                const visible = trackScroll(h.ref.scrollIndexIntoView({ ...options, index: 2 }));
+                await flushMicrotasks();
+                expect(visible.resolved).toBe(true);
+                expect(h.scrollToCalls).toHaveLength(calls);
+            });
+        }
+    }
+
     for (const offset of [0, 250, 500]) {
         it(`leaves an oversized row covering the viewport in place (offset: ${offset})`, async () => {
             const h = harness!;

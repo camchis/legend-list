@@ -707,21 +707,36 @@ export type LegendListRef = {
      * @param params - Parameters for scrolling.
      * @param params.animated - If true, animates the scroll. Default: true.
      * @param params.index - The index to scroll to.
+     * @param params.itemOffset - Region start measured from the item's start along the scroll axis. Default: 0 when itemLength is provided.
+     * @param params.itemLength - Region length along the scroll axis. Default: 0 when itemOffset is provided. Omit both to reveal the whole item.
      * @param params.viewportMargin - Space to keep clear at the start and end of the viewport along the scroll axis.
+     * A visible region does not scroll; otherwise its nearest edge aligns inside the margins. A region larger than the available space aligns its start.
      */
     scrollIndexIntoView(params: {
         animated?: boolean | undefined;
         index: number;
+        itemOffset?: number;
+        itemLength?: number;
         viewportMargin?: { start?: number; end?: number };
     }): Promise<void>;
 
     /**
-     * Scrolls a specific index into view.
+     * Scrolls a specific item into view.
      * @param params - Parameters for scrolling.
      * @param params.animated - If true, animates the scroll. Default: true.
      * @param params.item - The item to scroll to.
+     * @param params.itemOffset - Region start measured from the item's start along the scroll axis. Default: 0 when itemLength is provided.
+     * @param params.itemLength - Region length along the scroll axis. Default: 0 when itemOffset is provided. Omit both to reveal the whole item.
+     * @param params.viewportMargin - Space to keep clear at the start and end of the viewport along the scroll axis.
+     * A visible region does not scroll; otherwise its nearest edge aligns inside the margins. A region larger than the available space aligns its start.
      */
-    scrollItemIntoView(params: { animated?: boolean | undefined; item: any }): Promise<void>;
+    scrollItemIntoView(params: {
+        animated?: boolean | undefined;
+        item: any;
+        itemOffset?: number;
+        itemLength?: number;
+        viewportMargin?: { start?: number; end?: number };
+    }): Promise<void>;
 
     /**
      * Scrolls to the end of the list.

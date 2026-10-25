@@ -1806,6 +1806,77 @@ describe("createImperativeHandle.scrollIndexIntoView oversized rows", () => {
     }
 });
 
+describe("createImperativeHandle inner-item regions", () => {
+    for (const platform of ["ios", "android", "web"] as const) {
+        for (const horizontal of [false, true]) {
+            for (const method of ["scrollIndexIntoView", "scrollItemIntoView"] as const) {
+                for (const [name, region, expectedOffset] of [
+                    ["above", { itemLength: 20, itemOffset: 0 }, 990],
+                    ["below", { itemLength: 40, itemOffset: 350 }, 1110],
+                    ["visible", { itemLength: 100, itemOffset: 50 }, undefined],
+                    ["at the margins", { itemLength: 270, itemOffset: 10 }, undefined],
+                    ["a point by default", { itemOffset: 350 }, 1070],
+                    ["at the item start by default", { itemLength: 20 }, 990],
+                    ["taller than the available space", { itemLength: 300, itemOffset: 50 }, 1040],
+                    ["covering the viewport", { itemLength: 600, itemOffset: 0 }, 990],
+                    ["the whole item by default", {}, undefined],
+                ] as const) {
+                    it(`${method} reveals ${name} on ${platform} (horizontal: ${horizontal})`, async () => {
+                        const originalPlatform = Platform.OS;
+                        Platform.OS = platform;
+                        const data = Array.from({ length: 30 }, (_, id) => ({ id }));
+                        let observedOffset = 1000;
+                        const scrollTo = mock(({ x, y }: { x: number; y: number }) => {
+                            observedOffset = horizontal ? x : y;
+                        });
+                        const ctx = createMockContext(
+                            {},
+                            {
+                                didFinishInitialScroll: true,
+                                positions: data.map((_, index) => index * 100 + (index > 10 ? 900 : 0)),
+                                props: {
+                                    data,
+                                    getFixedItemSize: (_, index) => (index === 10 ? 1000 : 100),
+                                    horizontal,
+                                },
+                                scrollLength: 300,
+                                totalSize: 3900,
+                            },
+                        );
+                        ctx.state.refScroller.current = {
+                            getCurrentScrollOffset: () => observedOffset,
+                            getScrollableNode: () => ({}),
+                            scrollTo,
+                        } as unknown as NonNullable<typeof ctx.state.refScroller.current>;
+                        try {
+                            const handle = createImperativeHandle(ctx);
+                            const options = { animated: false, ...region, viewportMargin: { end: 20, start: 10 } };
+                            const pending =
+                                method === "scrollIndexIntoView"
+                                    ? handle.scrollIndexIntoView({ ...options, index: 10 })
+                                    : handle.scrollItemIntoView({ ...options, item: data[10] });
+                            if (expectedOffset === undefined) {
+                                expect(scrollTo).not.toHaveBeenCalled();
+                            } else {
+                                expect(scrollTo).toHaveBeenLastCalledWith({
+                                    animated: false,
+                                    x: horizontal ? expectedOffset : 0,
+                                    y: horizontal ? 0 : expectedOffset,
+                                });
+                                finishScrollTo(ctx);
+                            }
+                            expect(await pending).toBeUndefined();
+                        } finally {
+                            ctx.state.scheduledWork.dispose();
+                            Platform.OS = originalPlatform;
+                        }
+                    });
+                }
+            }
+        }
+    }
+});
+
 describe("native scroll refs", () => {
     it("returns the native instances unchanged", () => {
         Platform.OS = "ios";
