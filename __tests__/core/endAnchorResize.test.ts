@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import "../setup";
 
+import { checkLayoutInvariants } from "../../examples-shared/layoutInvariants";
 import {
     handleBootstrapInitialScrollLayoutChange,
     schedulePreservedEndAnchorCorrection,
@@ -216,6 +217,42 @@ describe.each(["web", "ios", "android"] as const)("end anchoring across a late v
         expect(scrollTo).not.toHaveBeenCalled();
         expect(ctx.state.scroll).toBe(400);
     });
+
+    for (const queued of [false, true]) {
+        it(`does not jump or blank when a preserved end index becomes out of range (queued=${queued})`, async () => {
+            const { ctx, observed, scrollTo, setObserved } = setup(0);
+            const { state, values } = ctx;
+            state.props.initialScrollAtEnd = true;
+            state.props.maintainScrollAtEnd = undefined;
+            state.props.maintainVisibleContentPosition = { data: false, size: false };
+            if (queued) schedulePreservedEndAnchorCorrection(ctx);
+
+            state.props.data = state.props.data.slice(0, -2);
+            state.idCache.length = state.positions.length = state.props.data.length;
+            state.totalSize = 600;
+            values.set("totalSize", 600);
+            state.scroll = state.lastNativeScroll = 200;
+            setObserved(200);
+            // Only the bottom window is rendered, so a scroll to zero would leave it blank.
+            values.set("numContainers", 4);
+            for (let id = 0; id < 4; id++) {
+                values.set(`containerItemKey${id}`, state.idCache[id + 2]);
+                values.set(`containerPosition${id}`, state.positions[id + 2]);
+            }
+            expect(checkLayoutInvariants(ctx, { scrollOffset: observed() })).toEqual([]);
+            if (!queued) schedulePreservedEndAnchorCorrection(ctx);
+
+            for (let frame = 0; frame < 2; frame++) {
+                flushFrame();
+                await Promise.resolve();
+                expect(checkLayoutInvariants(ctx, { scrollOffset: observed() })).toEqual([]);
+                expect(observed()).toBe(200);
+                expect(state.scroll).toBe(200);
+            }
+            expect(scrollTo).not.toHaveBeenCalled();
+            expect(state.preservedEndAnchorCorrection).toBeUndefined();
+        });
+    }
 
     it.skipIf(platform !== "web")(
         "flushes an already queued instant follow on resize without replaying it next frame",

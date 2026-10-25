@@ -501,6 +501,23 @@ afterEach(() => {
 });
 
 describe("LegendList layout fuzz", () => {
+    it.each(["ios", "android", "web"] as const)(
+        "keeps the viewport covered after prepending then removing near the end (%s, seed 99)",
+        async (platform) => {
+            const { config, sizeSeed } = generate(99);
+            const { failure } = await runScenario(
+                99,
+                { ...config, platform },
+                [
+                    { n: 1, t: "prepend" },
+                    { at: 0.744, n: 2, t: "remove" },
+                ],
+                sizeSeed,
+            );
+            expect(failure).toBeUndefined();
+        },
+    );
+
     it(`keeps layout invariants across ${getSeeds().length} seeded scenarios`, async () => {
         const failures: string[] = [];
         const known = new Map<KnownIssue, number[]>();

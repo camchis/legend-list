@@ -314,6 +314,7 @@ function getPreservedEndAnchorOffsetDiff(ctx: StateContext) {
         !initialScroll ||
         initialScroll.viewPosition !== 1 ||
         state.props.data.length === 0 ||
+        (initialScroll.index !== undefined && initialScroll.index >= state.props.data.length) ||
         isOffsetInitialScrollSession(state)
     ) {
         return;
